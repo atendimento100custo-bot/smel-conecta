@@ -1,24 +1,48 @@
 // src/pages/Dashboard.jsx
 import { useMemo } from 'react'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { useSupabaseData } from '../hooks/useSupabaseData'
-import { useAuth } from '../hooks/useAuth'
+import { useTheme } from '../contexts/ThemeContext'
 import Topbar from '../components/Topbar'
 import { subDays, format, isSameDay } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
 function KpiCard({ label, value, sub, highlight }) {
   return (
-    <div className={`rounded-xl border p-4 ${highlight ? 'bg-gradient-to-br from-primary-700 to-primary-500 border-transparent text-white' : 'bg-white border-slate-200'}`}>
-      <p className={`text-[9px] font-bold uppercase tracking-widest mb-1 ${highlight ? 'text-primary-100' : 'text-slate-400'}`}>{label}</p>
-      <p className={`text-3xl font-extrabold leading-none ${highlight ? 'text-white' : 'text-navy-900'}`}>{value}</p>
-      {sub && <p className={`text-[10px] mt-1 ${highlight ? 'text-primary-100' : 'text-slate-400'}`}>{sub}</p>}
+    <div className={`rounded-xl border p-4 ${
+      highlight
+        ? 'bg-gradient-to-br from-primary-700 to-primary-500 border-transparent text-white'
+        : 'bg-white dark:bg-navy-800 border-slate-200 dark:border-navy-700'
+    }`}>
+      <p className={`text-[9px] font-bold uppercase tracking-widest mb-1 ${
+        highlight ? 'text-primary-100' : 'text-slate-400 dark:text-slate-500'
+      }`}>{label}</p>
+      <p className={`text-3xl font-extrabold leading-none ${
+        highlight ? 'text-white' : 'text-navy-900 dark:text-white'
+      }`}>{value}</p>
+      {sub && <p className={`text-[10px] mt-1 ${
+        highlight ? 'text-primary-100' : 'text-slate-400 dark:text-slate-500'
+      }`}>{sub}</p>}
+    </div>
+  )
+}
+
+function ChartTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="bg-white dark:bg-navy-700 border border-slate-200 dark:border-navy-600 rounded-lg shadow-lg px-3 py-2 text-xs">
+      <p className="font-bold text-navy-900 dark:text-white mb-1 capitalize">{label}</p>
+      {payload.map(p => (
+        <p key={p.name} style={{ color: p.fill }} className="font-medium">
+          {p.name}: {p.value}
+        </p>
+      ))}
     </div>
   )
 }
 
 export default function Dashboard() {
-  const { profile } = useAuth()
+  const { dark } = useTheme()
   const { data: alunos } = useSupabaseData('alunos', 'id,status,turma_id,data_nasc')
   const { data: turmas } = useSupabaseData('turmas', 'id,status,modalidade_id,modalidades(nome,emoji)')
   const { data: presencas } = useSupabaseData('presencas', 'id,data,presente,turma_id,aluno_id')
@@ -27,20 +51,17 @@ export default function Dashboard() {
   const alunosAtivos = alunos.filter(a => a.status === 'Ativo').length
   const turmasAtivas = turmas.filter(t => t.status === 'Ativa').length
 
-  // Melhor Idade = alunos ativos com 60+ anos
   const melhorIdade = useMemo(() => alunos.filter(a => {
     if (a.status !== 'Ativo' || !a.data_nasc) return false
     const idade = new Date().getFullYear() - new Date(a.data_nasc).getFullYear()
     return idade >= 60
   }).length, [alunos])
 
-  // Frequência média geral
   const freqMedia = useMemo(() => {
     if (!presencas.length) return 0
     return Math.round((presencas.filter(p => p.presente).length / presencas.length) * 100)
   }, [presencas])
 
-  // Atestados vencendo em 30 dias
   const hoje = new Date()
   const em30 = new Date(); em30.setDate(hoje.getDate() + 30)
   const atestadosVencendo = atestados.filter(a => {
@@ -48,18 +69,16 @@ export default function Dashboard() {
     return val >= hoje && val <= em30
   }).length
 
-  // Presença últimos 7 dias
   const ultimos7 = Array.from({ length: 7 }, (_, i) => {
     const d = subDays(new Date(), 6 - i)
     const dp = presencas.filter(p => isSameDay(new Date(p.data), d))
     return {
       dia: format(d, 'EEE', { locale: ptBR }),
-      presentes: dp.filter(p => p.presente).length,
-      faltas: dp.filter(p => !p.presente).length,
+      Presentes: dp.filter(p => p.presente).length,
+      Faltas: dp.filter(p => !p.presente).length,
     }
   })
 
-  // Alunos por modalidade
   const porModalidade = useMemo(() => {
     const map = {}
     turmas.forEach(t => {
@@ -72,10 +91,15 @@ export default function Dashboard() {
     return Object.values(map).sort((a, b) => b.count - a.count)
   }, [turmas, alunos])
 
+  // chart theme colors
+  const axisColor = dark ? '#475569' : '#94a3b8'
+  const gridColor = dark ? '#1e2d42' : '#f1f5f9'
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <Topbar title="Dashboard" />
       <div className="flex-1 overflow-y-auto p-5 space-y-4">
+
         {/* KPIs */}
         <div className="grid grid-cols-4 gap-3">
           <KpiCard label="Alunos Ativos" value={alunosAtivos} sub={`em ${turmasAtivas} turmas`} highlight />
@@ -86,48 +110,82 @@ export default function Dashboard() {
 
         {/* Alertas */}
         {atestadosVencendo > 0 && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-800 font-medium">
+          <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl px-4 py-3 text-xs text-amber-800 dark:text-amber-300 font-medium">
             ⚠️ {atestadosVencendo} atestado(s) vencendo nos próximos 30 dias
           </div>
         )}
 
         {/* Charts */}
         <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white rounded-xl border border-slate-200 p-4">
-            <p className="text-xs font-bold text-navy-900 mb-3">Presença — últimos 7 dias</p>
-            <ResponsiveContainer width="100%" height={140}>
-              <BarChart data={ultimos7} barSize={14}>
-                <XAxis dataKey="dia" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                <YAxis hide />
-                <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid #e2e8f0' }} />
-                <Bar dataKey="presentes" fill="#009640" radius={[3,3,0,0]} name="Presentes" />
-                <Bar dataKey="faltas" fill="#fecaca" radius={[3,3,0,0]} name="Faltas" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
 
-          <div className="bg-white rounded-xl border border-slate-200 p-4">
-            <p className="text-xs font-bold text-navy-900 mb-3">Alunos por Modalidade</p>
-            <div className="space-y-2.5">
-              {porModalidade.length === 0 && (
-                <p className="text-xs text-slate-400">Nenhum dado disponível</p>
-              )}
-              {porModalidade.map(m => (
-                <div key={m.nome}>
-                  <div className="flex justify-between text-[10px] text-slate-600 mb-1">
-                    <span>{m.emoji} {m.nome}</span>
-                    <span className="font-bold">{m.count}</span>
-                  </div>
-                  <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-primary-600 to-primary-400 rounded-full transition-all"
-                      style={{ width: alunosAtivos ? `${(m.count / alunosAtivos) * 100}%` : '0%' }}
-                    />
-                  </div>
-                </div>
-              ))}
+          {/* Gráfico de presença */}
+          <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
+            <p className="text-xs font-bold text-navy-900 dark:text-white mb-3">Presença — últimos 7 dias</p>
+            {presencas.length === 0 ? (
+              <div className="h-[140px] flex flex-col items-center justify-center gap-2">
+                <div className="text-2xl">📊</div>
+                <p className="text-xs text-slate-400 dark:text-slate-500 text-center">
+                  Nenhuma presença registrada ainda.<br />Registre presença para ver o gráfico.
+                </p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={140}>
+                <BarChart data={ultimos7} barSize={14} barGap={3}>
+                  <CartesianGrid vertical={false} stroke={gridColor} strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="dia"
+                    tick={{ fontSize: 10, fill: axisColor }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis hide />
+                  <Tooltip content={<ChartTooltip />} cursor={{ fill: dark ? '#1e2d42' : '#f8fafc' }} />
+                  <Bar dataKey="Presentes" fill="#009640" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="Faltas" fill="#f87171" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+            {/* Legenda */}
+            <div className="flex items-center gap-3 mt-2">
+              <span className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
+                <span className="w-2.5 h-2.5 rounded-sm bg-primary-600 inline-block" /> Presentes
+              </span>
+              <span className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
+                <span className="w-2.5 h-2.5 rounded-sm bg-red-400 inline-block" /> Faltas
+              </span>
             </div>
           </div>
+
+          {/* Alunos por modalidade */}
+          <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
+            <p className="text-xs font-bold text-navy-900 dark:text-white mb-3">Alunos por Modalidade</p>
+            {porModalidade.length === 0 ? (
+              <div className="h-[140px] flex flex-col items-center justify-center gap-2">
+                <div className="text-2xl">🏃</div>
+                <p className="text-xs text-slate-400 dark:text-slate-500 text-center">
+                  Nenhuma turma com alunos ainda.<br />Cadastre turmas e alunos para ver aqui.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {porModalidade.map(m => (
+                  <div key={m.nome}>
+                    <div className="flex justify-between text-[10px] text-slate-600 dark:text-slate-300 mb-1">
+                      <span>{m.emoji} {m.nome}</span>
+                      <span className="font-bold">{m.count}</span>
+                    </div>
+                    <div className="h-1.5 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-primary-600 to-primary-400 rounded-full transition-all"
+                        style={{ width: alunosAtivos ? `${(m.count / alunosAtivos) * 100}%` : '0%' }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
         </div>
       </div>
     </div>

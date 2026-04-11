@@ -1,10 +1,11 @@
 // src/components/Sidebar.jsx
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
+import { useTheme } from '../contexts/ThemeContext'
 import {
   LayoutDashboard, MapPin, Trophy, Users, BookOpen,
   UserCheck, ClipboardList, Stethoscope, Star,
-  Bus, BarChart2, Key, Settings, LogOut
+  Bus, BarChart2, Key, Settings, LogOut, Sun, Moon
 } from 'lucide-react'
 
 const NAV = [
@@ -51,22 +52,23 @@ const NAV = [
 
 export default function Sidebar() {
   const { profile, hasMinRole, signOut } = useAuth()
+  const { dark, toggle } = useTheme()
 
   const initials = profile?.nome
     ? profile.nome.split(' ').slice(0, 2).map(n => n[0]).join('').toUpperCase()
     : '?'
 
   return (
-    <aside className="w-[220px] flex-shrink-0 bg-white border-r border-slate-200 flex flex-col h-screen sticky top-0">
+    <aside className="w-[220px] flex-shrink-0 bg-white dark:bg-navy-800 border-r border-slate-200 dark:border-navy-700 flex flex-col h-screen sticky top-0">
       {/* Logo */}
-      <div className="px-4 py-4 border-b border-slate-200">
+      <div className="px-4 py-4 border-b border-slate-200 dark:border-navy-700">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-700 to-primary-500 flex items-center justify-center text-white text-base shadow-sm shadow-primary-200">
             ⚽
           </div>
           <div>
-            <div className="text-[11px] font-extrabold text-navy-900 tracking-tight leading-none">SMEL Conecta</div>
-            <div className="text-[9px] text-slate-400 font-normal mt-0.5">Volta Redonda</div>
+            <div className="text-[11px] font-extrabold text-navy-900 dark:text-white tracking-tight leading-none">SMEL Conecta</div>
+            <div className="text-[9px] text-slate-400 dark:text-slate-500 font-normal mt-0.5">Volta Redonda</div>
           </div>
         </div>
       </div>
@@ -78,7 +80,7 @@ export default function Sidebar() {
           if (!visibleItems.length) return null
           return (
             <div key={section.label} className="mb-1">
-              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest px-2 py-1.5 mt-2">
+              <p className="text-[9px] font-bold text-slate-400 dark:text-slate-600 uppercase tracking-widest px-2 py-1.5 mt-2">
                 {section.label}
               </p>
               {visibleItems.map(({ to, icon: Icon, label }) => (
@@ -89,8 +91,8 @@ export default function Sidebar() {
                   className={({ isActive }) =>
                     `flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[12px] font-medium transition-colors mb-0.5 ${
                       isActive
-                        ? 'bg-primary-50 text-primary-700 font-semibold'
-                        : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+                        ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-400 font-semibold'
+                        : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-navy-700 hover:text-slate-800 dark:hover:text-white'
                     }`
                   }
                 >
@@ -104,14 +106,23 @@ export default function Sidebar() {
       </nav>
 
       {/* User footer */}
-      <div className="px-3 py-3 border-t border-slate-200">
-        <div className="flex items-center gap-2 px-2 py-2 rounded-lg bg-slate-50">
+      <div className="px-3 py-3 border-t border-slate-200 dark:border-navy-700 space-y-2">
+        {/* Theme toggle */}
+        <button
+          onClick={toggle}
+          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-navy-700 transition-colors"
+        >
+          {dark ? <Sun size={13} className="text-amber-400" /> : <Moon size={13} />}
+          {dark ? 'Modo Claro' : 'Modo Escuro'}
+        </button>
+
+        <div className="flex items-center gap-2 px-2 py-2 rounded-lg bg-slate-50 dark:bg-navy-900">
           <div className="w-6 h-6 rounded-full bg-gradient-to-br from-primary-600 to-primary-400 flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0">
             {initials}
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-[10px] font-semibold text-navy-900 truncate">{profile?.nome ?? '—'}</div>
-            <div className="text-[9px] text-slate-400 capitalize">{profile?.cargo ?? ''}</div>
+            <div className="text-[10px] font-semibold text-navy-900 dark:text-white truncate">{profile?.nome ?? '—'}</div>
+            <div className="text-[9px] text-slate-400 dark:text-slate-500 capitalize">{profile?.cargo ?? ''}</div>
           </div>
           <button onClick={signOut} className="text-slate-400 hover:text-red-500 transition-colors p-0.5">
             <LogOut size={13} />
