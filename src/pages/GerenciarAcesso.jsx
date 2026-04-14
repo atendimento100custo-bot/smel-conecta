@@ -1,7 +1,7 @@
 // src/pages/GerenciarAcesso.jsx
 import { useState, useCallback } from 'react'
 import { useSupabaseData } from '../hooks/useSupabaseData'
-import { supabase } from '../lib/supabase'
+import { supabase, supabaseAdmin } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import Topbar from '../components/Topbar'
 import Button from '../components/ui/Button'
@@ -154,21 +154,31 @@ export default function GerenciarAcesso() {
     setToggling(null)
   }
 
-  // Create user handler
+  // Create user handler — usa Admin API para não deslogar o admin atual
   async function handleCreate() {
     if (!createForm.nome || !createForm.email || !createForm.senha) return
     setCreating(true)
     setCreateError('')
     setCreateSuccess(false)
 
-    const { data, error } = await supabase.auth.signUp({
+    if (!supabaseAdmin) {
+      setCreateError('Configuração admin não disponível. Contate o administrador do sistema.')
+      setCreating(false)
+      return
+    }
+
+    const { data, error } = await supabaseAdmin.auth.admin.createUser({
       email: createForm.email,
       password: createForm.senha,
-      options: { data: { nome: createForm.nome } }
+      email_confirm: true,
     })
 
     if (error || !data.user) {
-      setCreateError(error?.message ?? 'Erro ao criar usuário')
+      setCreateError(
+        error?.message?.includes('already been registered')
+          ? 'Este e-mail já está cadastrado no sistema.'
+          : (error?.message ?? 'Erro ao criar usuário')
+      )
       setCreating(false)
       return
     }
@@ -176,11 +186,10 @@ export default function GerenciarAcesso() {
     await supabase.from('profiles').upsert({
       id: data.user.id,
       nome: createForm.nome,
-      email: createForm.email,
       cargo: createForm.cargo,
       telefone: createForm.telefone || null,
       ativo: true,
-    })
+    }, { onConflict: 'id' })
 
     setCreating(false)
     setCreateSuccess(true)

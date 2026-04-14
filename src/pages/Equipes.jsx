@@ -9,7 +9,8 @@ import Badge from '../components/ui/Badge'
 import Modal from '../components/ui/Modal'
 import EmptyState from '../components/ui/EmptyState'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
-import { X, Phone, MapPin, BookOpen, Pencil, Trash2 } from 'lucide-react'
+import { X, Phone, MapPin, BookOpen, Pencil, Trash2, UserPlus } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 
 const CARGOS = ['professor', 'coordenador', 'estagiario', 'admin']
 const CARGO_LABELS = { professor: 'Professor', coordenador: 'Coordenador', estagiario: 'Estagiário', admin: 'Administrador' }
@@ -23,6 +24,7 @@ function getInitials(nome = '') {
 export default function Equipes() {
   const { isAdmin, isCoordenador } = useAuth()
   const canEdit = isAdmin || isCoordenador
+  const navigate = useNavigate()
 
   const { data: membros, loading: loadingMembros, reload } = useSupabaseData('profiles', 'id,nome,cargo,telefone,ativo')
   const { data: turmas, loading: loadingTurmas } = useSupabaseData('turmas', 'id,polo_id,professor_id,modalidades(nome,emoji),dias,horario')
@@ -142,7 +144,15 @@ export default function Equipes() {
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
-      <Topbar title={`Equipe · ${ativos.length} membros`} />
+      <Topbar
+        title={`Equipe · ${ativos.length} membros`}
+        action={canEdit && (
+          <Button size="sm" onClick={() => navigate('/gerenciar-acesso')}>
+            <UserPlus size={13} />
+            <span className="hidden sm:inline">Novo Funcionário</span>
+          </Button>
+        )}
+      />
 
       <div className="flex-1 overflow-y-auto p-3 md:p-5">
         {loading ? (
