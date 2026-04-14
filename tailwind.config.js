@@ -22,10 +22,20 @@ export default {
           950: '#023618',
         },
         navy: {
-          900: '#0f1923',
-          800: '#162032',
-          700: '#1e2d42',
-          600: '#253553',
+          // Dark mode surface hierarchy — deepest to lightest
+          950: '#060A14',   // sidebar / deepest chrome
+          900: '#080E1D',   // page background
+          850: '#0A1222',   // subtle offset
+          800: '#0F1B30',   // card surface
+          750: '#111C33',   // card surface alt
+          700: '#162240',   // elevated / hover state
+          650: '#1A2A4E',   // focused state
+          600: '#1E2F52',   // active badge bg
+          500: '#253A62',   // inactive
+          400: '#4A6090',   // secondary text
+          300: '#7A95CC',   // muted text
+          200: '#A8BFDD',   // placeholder
+          100: '#D0DCEE',   // faint
         }
       }
     },

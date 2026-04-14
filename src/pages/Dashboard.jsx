@@ -43,13 +43,23 @@ function ChartTooltip({ active, payload, label }) {
 
 export default function Dashboard() {
   const { dark } = useTheme()
-  const { data: alunos } = useSupabaseData('alunos', 'id,status,turma_id,data_nasc')
-  const { data: turmas } = useSupabaseData('turmas', 'id,status,modalidade_id,modalidades(nome,emoji)')
+  const { data: alunos } = useSupabaseData('alunos', 'id,status,turma_id,data_nasc,data_matricula')
+  const { data: turmas } = useSupabaseData('turmas', 'id,status,modalidade_id,capacidade,modalidades(nome,emoji)')
   const { data: presencas } = useSupabaseData('presencas', 'id,data,presente,turma_id,aluno_id')
   const { data: atestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id')
+  const { data: polos } = useSupabaseData('polos', 'id,status')
+
+  const hoje = new Date()
+  const em30 = new Date(); em30.setDate(hoje.getDate() + 30)
+  const ha30 = new Date(); ha30.setDate(hoje.getDate() - 30)
 
   const alunosAtivos = alunos.filter(a => a.status === 'Ativo').length
   const turmasAtivas = turmas.filter(t => t.status === 'Ativa').length
+  const polosAtivos = polos.filter(p => p.status === 'Ativo').length
+
+  const alunosNovos = alunos.filter(a =>
+    a.data_matricula && new Date(a.data_matricula) >= ha30
+  ).length
 
   const melhorIdade = useMemo(() => alunos.filter(a => {
     if (a.status !== 'Ativo' || !a.data_nasc) return false
@@ -62,12 +72,19 @@ export default function Dashboard() {
     return Math.round((presencas.filter(p => p.presente).length / presencas.length) * 100)
   }, [presencas])
 
-  const hoje = new Date()
-  const em30 = new Date(); em30.setDate(hoje.getDate() + 30)
+  const ocupacao = useMemo(() => {
+    const cap = turmas.filter(t => t.status === 'Ativa').reduce((s, t) => s + (t.capacidade || 0), 0)
+    return cap ? Math.round((alunosAtivos / cap) * 100) : 0
+  }, [turmas, alunosAtivos])
+
   const atestadosVencendo = atestados.filter(a => {
     const val = new Date(a.data_validade)
     return val >= hoje && val <= em30
   }).length
+
+  const atestadosVencidos = atestados.filter(a =>
+    new Date(a.data_validade) < hoje
+  ).length
 
   const ultimos7 = Array.from({ length: 7 }, (_, i) => {
     const d = subDays(new Date(), 6 - i)
@@ -98,14 +115,22 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <Topbar title="Dashboard" />
-      <div className="flex-1 overflow-y-auto p-5 space-y-4">
+      <div className="flex-1 overflow-y-auto p-3 md:p-5 space-y-4">
 
-        {/* KPIs */}
-        <div className="grid grid-cols-4 gap-3">
+        {/* KPIs — row 1 */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <KpiCard label="Alunos Ativos" value={alunosAtivos} sub={`em ${turmasAtivas} turmas`} highlight />
           <KpiCard label="Turmas Ativas" value={turmasAtivas} sub="em funcionamento" />
           <KpiCard label="Freq. Média" value={`${freqMedia}%`} sub="geral" />
           <KpiCard label="Melhor Idade" value={melhorIdade} sub="alunos 60+" />
+        </div>
+
+        {/* KPIs — row 2 */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <KpiCard label="Polos Ativos" value={polosAtivos} sub="unidades" />
+          <KpiCard label="Novos (30 dias)" value={alunosNovos} sub="matrículas recentes" />
+          <KpiCard label="Ocupação" value={`${ocupacao}%`} sub="capacidade total" />
+          <KpiCard label="Atestados Vencidos" value={atestadosVencidos} sub="requer atenção" />
         </div>
 
         {/* Alertas */}
@@ -114,9 +139,14 @@ export default function Dashboard() {
             ⚠️ {atestadosVencendo} atestado(s) vencendo nos próximos 30 dias
           </div>
         )}
+        {atestadosVencidos > 0 && (
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl px-4 py-3 text-xs text-red-700 dark:text-red-300 font-medium">
+            🚨 {atestadosVencidos} atestado(s) vencido(s) — alunos precisam renovar
+          </div>
+        )}
 
         {/* Charts */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
           {/* Gráfico de presença */}
           <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">

@@ -84,7 +84,7 @@ export default function MelhorIdade() {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <Topbar title="Melhor Idade" />
-      <div className="flex-1 overflow-y-auto p-5 space-y-4">
+      <div className="flex-1 overflow-y-auto p-3 md:p-5 space-y-4">
 
         {/* Period selector */}
         <div className="flex items-center gap-2">

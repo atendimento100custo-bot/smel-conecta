@@ -2,10 +2,10 @@
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../contexts/ThemeContext'
+import { useSidebar } from '../contexts/SidebarContext'
 import {
-  LayoutDashboard, MapPin, Trophy, Users, BookOpen,
-  UserCheck, ClipboardList, Stethoscope, Star,
-  Bus, BarChart2, Key, Settings, LogOut, Sun, Moon
+  LayoutDashboard, MapPin, Trophy, Users,
+  UserCheck, BarChart2, Key, Settings, LogOut, Sun, Moon, X
 } from 'lucide-react'
 
 const NAV = [
@@ -20,24 +20,8 @@ const NAV = [
     items: [
       { to: '/polos', icon: MapPin, label: 'Polos', minRole: 'estagiario' },
       { to: '/modalidades', icon: Trophy, label: 'Modalidades', minRole: 'coordenador' },
-      { to: '/turmas', icon: BookOpen, label: 'Turmas', minRole: 'professor' },
       { to: '/alunos', icon: Users, label: 'Alunos', minRole: 'professor' },
       { to: '/equipes', icon: UserCheck, label: 'Equipe', minRole: 'coordenador' },
-    ]
-  },
-  {
-    label: 'Operacional',
-    items: [
-      { to: '/presenca', icon: ClipboardList, label: 'Presença', minRole: 'estagiario' },
-      { to: '/registro-aula', icon: ClipboardList, label: 'Registro de Aula', minRole: 'professor' },
-      { to: '/atestados', icon: Stethoscope, label: 'Atestados', minRole: 'professor' },
-    ]
-  },
-  {
-    label: 'Melhor Idade',
-    items: [
-      { to: '/melhor-idade', icon: Star, label: 'Elegibilidade', minRole: 'professor' },
-      { to: '/viagens', icon: Bus, label: 'Viagens', minRole: 'coordenador' },
     ]
   },
   {
@@ -53,23 +37,37 @@ const NAV = [
 export default function Sidebar() {
   const { profile, hasMinRole, signOut } = useAuth()
   const { dark, toggle } = useTheme()
+  const { open, close } = useSidebar()
 
   const initials = profile?.nome
     ? profile.nome.split(' ').slice(0, 2).map(n => n[0]).join('').toUpperCase()
     : '?'
 
   return (
-    <aside className="w-[220px] flex-shrink-0 bg-white dark:bg-navy-800 border-r border-slate-200 dark:border-navy-700 flex flex-col h-screen sticky top-0">
+    <aside className={`
+      fixed inset-y-0 left-0 z-40 w-[220px] flex-shrink-0
+      bg-white dark:bg-navy-800 border-r border-slate-200 dark:border-navy-700
+      flex flex-col transition-transform duration-300 ease-in-out
+      ${open ? 'translate-x-0' : '-translate-x-full'}
+      md:relative md:translate-x-0 md:z-auto
+    `}>
       {/* Logo */}
       <div className="px-4 py-4 border-b border-slate-200 dark:border-navy-700">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-700 to-primary-500 flex items-center justify-center text-white text-base shadow-sm shadow-primary-200">
-            ⚽
+          <div className="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0">
+            <img src="/logo-smel.png" alt="SMEL" className="w-full h-full object-contain" />
           </div>
-          <div>
+          <div className="flex-1 min-w-0">
             <div className="text-[11px] font-extrabold text-navy-900 dark:text-white tracking-tight leading-none">SMEL Conecta</div>
             <div className="text-[9px] text-slate-400 dark:text-slate-500 font-normal mt-0.5">Volta Redonda</div>
           </div>
+          {/* Close button — mobile only */}
+          <button
+            onClick={close}
+            className="md:hidden p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-navy-700 transition-colors"
+          >
+            <X size={15} />
+          </button>
         </div>
       </div>
 
@@ -88,6 +86,7 @@ export default function Sidebar() {
                   key={to}
                   to={to}
                   end={to === '/'}
+                  onClick={close}
                   className={({ isActive }) =>
                     `flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[12px] font-medium transition-colors mb-0.5 ${
                       isActive
@@ -107,7 +106,6 @@ export default function Sidebar() {
 
       {/* User footer */}
       <div className="px-3 py-3 border-t border-slate-200 dark:border-navy-700 space-y-2">
-        {/* Theme toggle */}
         <button
           onClick={toggle}
           className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-navy-700 transition-colors"

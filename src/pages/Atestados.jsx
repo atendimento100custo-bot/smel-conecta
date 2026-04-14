@@ -103,7 +103,7 @@ export default function Atestados() {
         title={`Atestados · ${atestadosFiltrados.length}`}
         action={canEdit && <Button size="sm" onClick={openNew}><Plus size={13} /> Novo Atestado</Button>}
       />
-      <div className="flex-1 overflow-y-auto p-5">
+      <div className="flex-1 overflow-y-auto p-3 md:p-5">
         {/* Filter chips */}
         <div className="flex gap-2 mb-4 flex-wrap">
           {FILTROS.map(f => (

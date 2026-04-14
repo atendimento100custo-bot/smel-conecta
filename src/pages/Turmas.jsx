@@ -9,7 +9,8 @@ import Badge from '../components/ui/Badge'
 import Modal from '../components/ui/Modal'
 import EmptyState from '../components/ui/EmptyState'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
-import { Plus, Pencil, Trash2, Clock, Users } from 'lucide-react'
+import { Plus, Pencil, Trash2, Clock, Users, ChevronRight, ArrowLeft } from 'lucide-react'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 
 const DIAS = ['Segunda','Terça','Quarta','Quinta','Sexta','Sábado','Domingo']
 const FAIXAS = ['Infantil','Adulto','Melhor Idade']
@@ -18,8 +19,11 @@ const EMPTY_FORM = { polo_id: '', modalidade_id: '', professor_id: '', faixa: 'A
 export default function Turmas() {
   const { isAdmin, isCoordenador, isProfessor, profile } = useAuth()
   const canEdit = isAdmin || isCoordenador || isProfessor
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const poloIdFilter = searchParams.get('polo_id')
 
-  const { data: turmas, loading, reload } = useSupabaseData('turmas', '*, polos(nome), modalidades(nome,emoji), profiles(nome)')
+  const { data: turmas, loading, reload } = useSupabaseData('turmas', '*, polos(id,nome), modalidades(nome,emoji), profiles(nome)')
   const { data: polos } = useSupabaseData('polos', 'id,nome')
   const { data: modalidades } = useSupabaseData('modalidades', 'id,nome,emoji')
   const { data: professores } = useSupabaseData('profiles', 'id,nome,cargo')
@@ -81,17 +85,33 @@ export default function Turmas() {
     reload()
   }
 
-  const turmasFiltradas = isAdmin || isCoordenador
-    ? turmas
-    : turmas.filter(t => t.professor_id === profile?.id)
+  const turmasFiltradas = (() => {
+    let list = (isAdmin || isCoordenador) ? turmas : turmas.filter(t => t.professor_id === profile?.id)
+    if (poloIdFilter) list = list.filter(t => t.polos?.id === poloIdFilter || t.polo_id === poloIdFilter)
+    return list
+  })()
+
+  const poloNome = poloIdFilter ? turmas.find(t => t.polo_id === poloIdFilter)?.polos?.nome : null
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <Topbar
-        title={`Turmas · ${turmasFiltradas.length}`}
-        action={canEdit && <Button size="sm" onClick={openNew}><Plus size={13}/> Nova Turma</Button>}
+        title={poloNome ? `Turmas — ${poloNome}` : `Turmas · ${turmasFiltradas.length}`}
+        action={
+          <div className="flex items-center gap-2">
+            {poloIdFilter && (
+              <button
+                onClick={() => navigate('/polos')}
+                className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 transition-colors"
+              >
+                <ArrowLeft size={13}/> Polos
+              </button>
+            )}
+            {canEdit && <Button size="sm" onClick={openNew}><Plus size={13}/> Nova Turma</Button>}
+          </div>
+        }
       />
-      <div className="flex-1 overflow-y-auto p-5">
+      <div className="flex-1 overflow-y-auto p-3 md:p-5">
         {loading ? (
           <p className="text-sm text-slate-400">Carregando...</p>
         ) : turmasFiltradas.length === 0 ? (
@@ -120,18 +140,26 @@ export default function Turmas() {
                   </div>
                   <div className="text-[10px] text-slate-400">Capacidade: {t.capacidade}</div>
                 </div>
-                {canEdit && (
-                  <div className="flex gap-1">
-                    <button onClick={() => openEdit(t)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
-                      <Pencil size={13}/>
-                    </button>
-                    {(isAdmin || isCoordenador) && (
-                      <button onClick={() => setDeletando(t)} className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors">
-                        <Trash2 size={13}/>
+                <div className="flex items-center justify-between">
+                  <button
+                    onClick={() => navigate(`/alunos?turma_id=${t.id}`)}
+                    className="flex items-center gap-1 text-[10px] font-semibold text-primary-600 hover:text-primary-700 transition-colors"
+                  >
+                    Ver Alunos <ChevronRight size={10}/>
+                  </button>
+                  {canEdit && (
+                    <div className="flex gap-1">
+                      <button onClick={() => openEdit(t)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                        <Pencil size={13}/>
                       </button>
-                    )}
-                  </div>
-                )}
+                      {(isAdmin || isCoordenador) && (
+                        <button onClick={() => setDeletando(t)} className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors">
+                          <Trash2 size={13}/>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             ))}
           </div>

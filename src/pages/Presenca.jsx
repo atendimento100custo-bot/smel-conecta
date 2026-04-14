@@ -203,7 +203,7 @@ export default function Presenca() {
     <div className="flex flex-col flex-1 overflow-hidden">
       <Topbar title="Presença" />
 
-      <div className="flex-1 overflow-y-auto p-5 space-y-5">
+      <div className="flex-1 overflow-y-auto p-3 md:p-5 space-y-5">
 
         {/* Selection row */}
         <div className="bg-white rounded-xl border border-slate-200 p-4">

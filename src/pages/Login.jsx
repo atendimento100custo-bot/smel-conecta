@@ -29,8 +29,8 @@ export default function Login() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-primary-700 to-primary-500 shadow-lg shadow-primary-200 text-3xl mb-3">
-            ⚽
+          <div className="inline-flex items-center justify-center w-24 h-24 rounded-2xl overflow-hidden shadow-lg shadow-slate-200 mb-3">
+            <img src="/logo-smel.png" alt="SMEL" className="w-full h-full object-cover" />
           </div>
           <h1 className="text-2xl font-extrabold text-navy-900">SMEL Conecta</h1>
           <p className="text-slate-400 text-sm mt-1">Prefeitura de Volta Redonda</p>

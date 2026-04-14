@@ -33,7 +33,7 @@ export default function Relatorios() {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <Topbar title="Relatórios PDF" />
-      <div className="flex-1 overflow-y-auto p-5">
+      <div className="flex-1 overflow-y-auto p-3 md:p-5">
         <div className="bg-white rounded-xl border border-slate-200 p-5 max-w-lg">
           <p className="text-sm font-bold text-navy-900 mb-4">Filtros</p>
 

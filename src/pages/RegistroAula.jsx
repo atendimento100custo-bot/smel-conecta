@@ -127,7 +127,7 @@ export default function RegistroAula() {
         }
       />
 
-      <div className="flex-1 overflow-y-auto p-5">
+      <div className="flex-1 overflow-y-auto p-3 md:p-5">
         {/* Filters */}
         <div className="flex gap-3 mb-4 flex-wrap">
           <select

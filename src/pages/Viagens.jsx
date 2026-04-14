@@ -142,7 +142,7 @@ export default function Viagens() {
         )}
       />
 
-      <div className="flex-1 overflow-y-auto p-5">
+      <div className="flex-1 overflow-y-auto p-3 md:p-5">
         {loading ? (
           <p className="text-sm text-slate-400">Carregando...</p>
         ) : viagens.length === 0 ? (

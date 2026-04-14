@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:smel.base44.app)",
+      "Bash(npm create:*)",
+      "Bash(bash \"C:/Users/daly_/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/brainstorming/scripts/start-server.sh\" --project-dir \"/c/Users/daly_/Claude Code/Smel\")",
+      "Bash(cat \"/c/Users/daly_/Claude Code/Smel/.superpowers/brainstorm/\"*/state/server-info)",
+      "Bash(xargs cat:*)",
+      "Bash(npm install:*)",
+      "Bash(timeout 5 npm run dev)",
+      "Bash(npm list:*)",
+      "Bash(npm run:*)",
+      "Bash(curl -s -o /dev/null -w '%{http_code}' -X POST https://api.supabase.com/v1/projects/pgkyvgmlfmgptxyhovqk/database/query -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBna3l2Z21sZm1ncHR4eWhvdnFrIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTkzNzk4MiwiZXhwIjoyMDkxNTEzOTgyfQ.IORqMIovCDV0LvheICTQH-46dAaphVZz7AD0ldpXLKg' -H 'Content-Type: application/json' -d '{\"query\":\"SELECT 1\"}')",
+      "Bash(psql --version)",
+      "Bash(node -e \"require\\('pg'\\)\")",
+      "Bash(node -e ':*)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(npx tsc:*)",
+      "Bash(npx vite:*)",
+      "Skill(taste-design)",
+      "Skill(taste-design:*)",
+      "Read(//c/Users/daly_/.claude/skills/ui-ux-pro-max/**)",
+      "Bash(python scripts/search.py \"government sports management admin dashboard dark mode\" --design-system -p \"SMEL Conecta\" -f markdown)",
+      "Bash(node -e \"require\\('@supabase/supabase-js'\\)\")",
+      "Bash(node scripts/seed-mock.js)",
+      "Bash(node scripts/seed-mock.cjs)",
+      "WebFetch(domain:share.google)",
+      "WebFetch(domain:www.google.com)",
+      "Bash(node_modules/.bin/vite build:*)",
+      "Bash(npx vercel:*)",
+      "Bash(node scripts/migrate.cjs)",
+      "Bash(powershell -command 'Set-Clipboard -Value '\\\\''-- 1. Adicionar campo telefone de emergencia:*)",
+      "Bash(clip.exe)",
+      "Bash(node scripts/create-admins.cjs)"
+    ]
+  }
+}

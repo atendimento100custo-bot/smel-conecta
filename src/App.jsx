@@ -5,10 +5,12 @@ import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Polos from './pages/Polos'
+import PoloDetalhe from './pages/PoloDetalhe'
 import Modalidades from './pages/Modalidades'
 import Equipes from './pages/Equipes'
 import Turmas from './pages/Turmas'
 import Alunos from './pages/Alunos'
+import AlunoDetalhe from './pages/AlunoDetalhe'
 import Presenca from './pages/Presenca'
 import Atestados from './pages/Atestados'
 import RegistroAula from './pages/RegistroAula'
@@ -29,10 +31,12 @@ export default function App() {
       <Route element={<R minRole="estagiario"><Layout /></R>}>
         <Route index element={<Dashboard />} />
         <Route path="polos" element={<Polos />} />
+        <Route path="polos/:id" element={<PoloDetalhe />} />
         <Route path="modalidades" element={<R minRole="coordenador"><Modalidades /></R>} />
         <Route path="equipes" element={<R minRole="coordenador"><Equipes /></R>} />
         <Route path="turmas" element={<R minRole="professor"><Turmas /></R>} />
         <Route path="alunos" element={<R minRole="professor"><Alunos /></R>} />
+        <Route path="alunos/:id" element={<R minRole="professor"><AlunoDetalhe /></R>} />
         <Route path="presenca" element={<Presenca />} />
         <Route path="registro-aula" element={<R minRole="professor"><RegistroAula /></R>} />
         <Route path="atestados" element={<R minRole="professor"><Atestados /></R>} />

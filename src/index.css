@@ -2,43 +2,133 @@
 @tailwind components;
 @tailwind utilities;
 
-* {
-  box-sizing: border-box;
-}
+/* ── Base ─────────────────────────────────────────────────── */
+* { box-sizing: border-box; }
 
 body {
   margin: 0;
   font-family: 'Outfit', sans-serif;
-  background-color: #f4f6f9;
+  background-color: #E8EDF5;
   color: #1e2d42;
 }
 
+/* Light mode card surface — icy white instead of pure white */
+:not(.dark) .bg-white {
+  background-color: #F2F6FB !important;
+}
+:not(.dark) .bg-slate-50 {
+  background-color: #E8EDF5 !important;
+}
+:not(.dark) .bg-slate-100 {
+  background-color: #DDE4EF !important;
+}
+
 .dark body {
-  background-color: #0f1923;
-  color: #e2e8f0;
+  background-color: #080E1D;
+  color: #E2EAFF;
 }
 
-:root.dark {
-  color-scheme: dark;
+:root.dark { color-scheme: dark; }
+
+/* ── DARK MODE — Global Surface Override ──────────────────── */
+/*
+  All bg-white / bg-slate-* become navy surfaces.
+  This eliminates white-on-dark flash without editing every file.
+*/
+.dark .bg-white {
+  background-color: #0F1B30 !important;
+}
+.dark .bg-slate-50 {
+  background-color: #080E1D !important;
+}
+.dark .bg-slate-100 {
+  background-color: #0D1728 !important;
+}
+.dark .bg-slate-200 {
+  background-color: #111C33 !important;
 }
 
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* ── DARK MODE — Borders ──────────────────────────────────── */
+.dark .border-slate-100,
+.dark .border-slate-200 {
+  border-color: rgba(255, 255, 255, 0.07) !important;
 }
-::-webkit-scrollbar-track {
-  background: #f1f1f1;
+.dark .divide-slate-100 > * + *,
+.dark .divide-slate-200 > * + * {
+  border-color: rgba(255, 255, 255, 0.07) !important;
 }
-.dark ::-webkit-scrollbar-track {
-  background: #162032;
+
+/* ── DARK MODE — Text ─────────────────────────────────────── */
+.dark .text-navy-900,
+.dark .text-slate-900 {
+  color: #EEF2FF !important;
 }
-::-webkit-scrollbar-thumb {
-  background: #c0c8d4;
-  border-radius: 3px;
+.dark .text-slate-800 {
+  color: #D8E2FF !important;
 }
-.dark ::-webkit-scrollbar-thumb {
-  background: #253553;
+.dark .text-slate-700 {
+  color: #B8CAEE !important;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: #009640;
+.dark .text-slate-600 {
+  color: #9AAFDD !important;
+}
+.dark .text-slate-500 {
+  color: #7A95CC !important;
+}
+.dark .text-slate-400 {
+  color: #607BB3 !important;
+}
+
+/* ── DARK MODE — Hover states ─────────────────────────────── */
+.dark .hover\:bg-slate-50:hover {
+  background-color: #111C33 !important;
+}
+.dark .hover\:bg-slate-100:hover {
+  background-color: #162240 !important;
+}
+
+/* ── DARK MODE — Table rows ───────────────────────────────── */
+.dark tr:hover td {
+  background-color: #111C33;
+}
+.dark thead tr th {
+  background-color: #080E1D !important;
+}
+
+/* ── DARK MODE — Inputs / Selects ─────────────────────────── */
+.dark input,
+.dark select,
+.dark textarea {
+  background-color: #0D1728 !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: #EEF2FF !important;
+}
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #607BB3 !important;
+}
+.dark input:focus,
+.dark select:focus,
+.dark textarea:focus {
+  border-color: #009640 !important;
+  box-shadow: 0 0 0 2px rgba(0, 150, 64, 0.25) !important;
+}
+
+/* ── DARK MODE — Filter chips / pills ─────────────────────── */
+.dark .border-slate-200 {
+  border-color: rgba(255,255,255,0.08) !important;
+}
+
+/* ── Scrollbar ────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: #f1f5f9; }
+.dark ::-webkit-scrollbar-track { background: #080E1D; }
+::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 4px; }
+.dark ::-webkit-scrollbar-thumb { background: #1E2F52; }
+::-webkit-scrollbar-thumb:hover { background: #009640; }
+
+/* ── Focus ring ───────────────────────────────────────────── */
+*:focus-visible {
+  outline: 2px solid #009640;
+  outline-offset: 2px;
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useSupabaseData } from '../hooks/useSupabaseData'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -9,13 +9,16 @@ import Modal from '../components/ui/Modal'
 import EmptyState from '../components/ui/EmptyState'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import { MapPin, Plus, Pencil, Trash2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 
 const TIPOS = ['Ginásio','Arena','Estádio','Complexo','Academia','Parque Aquático','Kartódromo','Museu','Centro','Mini Estádio']
 const EMPTY_FORM = { nome:'', tipo:'Ginásio', bairro:'', endereco:'', status:'Ativo' }
 
 export default function Polos() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, isCoordenador, profile } = useAuth()
+  const navigate = useNavigate()
   const { data: polos, loading, reload } = useSupabaseData('polos')
+  const { data: todasTurmas } = useSupabaseData('turmas', 'id,polo_id,professor_id')
   const [filtro, setFiltro] = useState('Todos')
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState(null)
@@ -23,8 +26,17 @@ export default function Polos() {
   const [deletando, setDeletando] = useState(null)
   const [saving, setSaving] = useState(false)
 
-  const tipos = ['Todos', ...new Set(polos.map(p => p.tipo))]
-  const visiveis = filtro === 'Todos' ? polos : polos.filter(p => p.tipo === filtro)
+  const meusPolos = useMemo(() => {
+    if (isAdmin || isCoordenador) return null
+    return new Set(todasTurmas.filter(t => t.professor_id === profile?.id).map(t => t.polo_id))
+  }, [todasTurmas, isAdmin, isCoordenador, profile])
+
+  const polosFiltradosPorAcesso = meusPolos !== null
+    ? polos.filter(p => meusPolos.has(p.id))
+    : polos
+
+  const tipos = ['Todos', ...new Set(polosFiltradosPorAcesso.map(p => p.tipo))]
+  const visiveis = filtro === 'Todos' ? polosFiltradosPorAcesso : polosFiltradosPorAcesso.filter(p => p.tipo === filtro)
 
   function openNew() { setForm(EMPTY_FORM); setEditing(null); setModalOpen(true) }
   function openEdit(polo) {
@@ -54,10 +66,10 @@ export default function Polos() {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <Topbar
-        title={`Polos · ${polos.length}`}
+        title={`Polos · ${polosFiltradosPorAcesso.length}`}
         action={isAdmin && <Button size="sm" onClick={openNew}><Plus size={13}/> Novo Polo</Button>}
       />
-      <div className="flex-1 overflow-y-auto p-5">
+      <div className="flex-1 overflow-y-auto p-3 md:p-5">
         {/* Filtros por tipo */}
         <div className="flex gap-2 flex-wrap mb-4">
           {tipos.map(t => (
@@ -84,26 +96,33 @@ export default function Polos() {
             action={isAdmin && <Button size="sm" onClick={openNew}><Plus size={13}/> Novo Polo</Button>}
           />
         ) : (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {visiveis.map(polo => (
-              <div key={polo.id} className="bg-white rounded-xl border border-slate-200 p-4 flex items-start gap-3">
-                <div className="w-9 h-9 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
+              <div
+                key={polo.id}
+                className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex items-start gap-3 cursor-pointer hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm transition-all group"
+                onClick={() => navigate(`/polos/${polo.id}`)}
+              >
+                <div className="w-9 h-9 rounded-lg bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center flex-shrink-0">
                   <MapPin size={16} className="text-primary-600" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-2">
-                    <p className="text-xs font-bold text-navy-900 leading-tight">{polo.nome}</p>
+                    <p className="text-xs font-bold text-navy-900 dark:text-white leading-tight group-hover:text-primary-700 dark:group-hover:text-primary-400 transition-colors">{polo.nome}</p>
                     <Badge color={polo.status === 'Ativo' ? 'green' : 'gray'}>{polo.status}</Badge>
                   </div>
-                  <p className="text-[10px] text-slate-400 mt-0.5">{polo.tipo} · {polo.bairro}</p>
-                  {polo.endereco && <p className="text-[10px] text-slate-400 mt-0.5 truncate">{polo.endereco}</p>}
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">{polo.tipo} · {polo.bairro}</p>
+                  {polo.endereco && <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 truncate">{polo.endereco}</p>}
+                  <p className="text-[10px] text-primary-600 dark:text-primary-400 mt-1.5 font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
+                    Ver detalhes →
+                  </p>
                 </div>
                 {isAdmin && (
-                  <div className="flex gap-1 flex-shrink-0">
-                    <button onClick={() => openEdit(polo)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
+                  <div className="flex gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
+                    <button onClick={() => openEdit(polo)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-navy-700 text-slate-400 hover:text-slate-600 transition-colors">
                       <Pencil size={13}/>
                     </button>
-                    <button onClick={() => setDeletando(polo)} className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors">
+                    <button onClick={() => setDeletando(polo)} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-500 transition-colors">
                       <Trash2 size={13}/>
                     </button>
                   </div>

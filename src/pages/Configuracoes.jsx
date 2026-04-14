@@ -49,7 +49,7 @@ export default function Configuracoes() {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <Topbar title="Configurações" />
-      <div className="flex-1 overflow-y-auto p-5 space-y-4 max-w-lg">
+      <div className="flex-1 overflow-y-auto p-3 md:p-5 space-y-4 max-w-lg">
 
         {/* Alterar Senha */}
         <div className="bg-white rounded-xl border border-slate-200 p-5">
