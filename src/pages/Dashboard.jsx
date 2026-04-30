@@ -78,13 +78,17 @@ export default function Dashboard() {
   }, [turmas, alunosAtivos])
 
   const atestadosVencendo = atestados.filter(a => {
+    const aluno = alunos.find(al => al.id === a.aluno_id)
+    if (!aluno || aluno.status !== 'Ativo') return false
     const val = new Date(a.data_validade)
     return val >= hoje && val <= em30
   }).length
 
-  const atestadosVencidos = atestados.filter(a =>
-    new Date(a.data_validade) < hoje
-  ).length
+  const atestadosVencidos = atestados.filter(a => {
+    const aluno = alunos.find(al => al.id === a.aluno_id)
+    if (!aluno || aluno.status !== 'Ativo') return false
+    return new Date(a.data_validade) < hoje
+  }).length
 
   const ultimos7 = Array.from({ length: 7 }, (_, i) => {
     const d = subDays(new Date(), 6 - i)

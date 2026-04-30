@@ -89,19 +89,6 @@ function DetalheModal({ modalidade, turmas, alunos, presencas, open, onClose }) 
         <KpiCard icon={MapPin} label="Polos" value={polosDistintos.length} colorClass="bg-purple-500" />
       </div>
 
-      {/* Faixas etárias */}
-      {(modalidade.faixas ?? []).length > 0 && (
-        <div className="mb-6">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Faixas Etárias</p>
-          <div className="flex flex-wrap gap-1.5">
-            {(modalidade.faixas ?? []).map(f => (
-              <span key={f} className="text-xs bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 px-3 py-1 rounded-full font-medium border border-slate-200 dark:border-slate-600">
-                {f}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Turmas agrupadas por polo */}
       {grupos.length > 0 ? (
@@ -276,11 +263,6 @@ export default function Modalidades() {
                     </span>
                   </div>
 
-                  <div className="flex flex-wrap gap-1 mb-3">
-                    {(m.faixas ?? []).map(f => (
-                      <span key={f} className="text-[9px] bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 px-2 py-0.5 rounded-full font-medium">{f}</span>
-                    ))}
-                  </div>
 
                   {canEdit && (
                     <div className="flex gap-1" onClick={e => e.stopPropagation()}>
@@ -334,17 +316,6 @@ export default function Modalidades() {
             <label className="block text-xs font-semibold text-slate-600 mb-1">Categoria</label>
             <input value={form.categoria} onChange={e => setForm(f => ({ ...f, categoria: e.target.value }))}
               className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Faixas etárias</label>
-            <div className="flex gap-2">
-              {FAIXAS.map(f => (
-                <button key={f} type="button" onClick={() => toggleFaixa(f)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                    form.faixas.includes(f) ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}>{f}</button>
-              ))}
-            </div>
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">Status</label>

@@ -4,7 +4,8 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useSupabaseData } from '../hooks/useSupabaseData'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../contexts/ThemeContext'
-import { supabase } from '../lib/supabase'
+import { useOfflineQueue } from '../hooks/useOfflineQueue'
+import { supabase, supabaseAdmin } from '../lib/supabase'
 import Topbar from '../components/Topbar'
 import Badge from '../components/ui/Badge'
 import Button from '../components/ui/Button'
@@ -12,8 +13,11 @@ import Modal from '../components/ui/Modal'
 import {
   ArrowLeft, MapPin, Users, BookOpen, Clock, Stethoscope,
   TrendingUp, UserCheck, CheckCircle2, Circle, Camera,
-  Bus, Star, Save, ChevronRight, Trophy, Plus
+  Bus, Star, Save, ChevronRight, Trophy, Plus, UserPlus,
+  Pencil, Trash2, Search, Filter, Upload, X
 } from 'lucide-react'
+import { NovoFuncionarioModal } from './Equipes'
+import ConfirmDialog from '../components/ui/ConfirmDialog'
 import { subDays, isSameDay, format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
@@ -24,7 +28,7 @@ const CARGO_COLORS = { professor: 'amber', coordenador: 'blue', estagiario: 'pur
 const CARGO_LABELS = { professor: 'Professor', coordenador: 'Coordenador', estagiario: 'Estagiário', admin: 'Administrador' }
 const DIAS_OPTIONS = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
 const FAIXAS = ['Infantil', 'Adulto', 'Melhor Idade']
-const EMPTY_TURMA_FORM = { modalidade_id: '', professor_id: '', dias: [], horario: '', faixa: 'Infantil', capacidade: 20, status: 'Ativa' }
+const EMPTY_TURMA_FORM = { modalidade_id: '', professores_ids: [], dias: [], horario: '', faixa: 'Infantil', faixa_etaria: '', capacidade: 20, status: 'Ativa' }
 
 function formatDate(dateStr) {
   if (!dateStr) return '—'
@@ -82,18 +86,24 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
   const [uploadingFoto, setUploadingFoto] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [buscaPresenca, setBuscaPresenca] = useState('')
 
   const dataHoje = new Date().toISOString().split('T')[0]
 
-  // Lock logic — 30 min grace period after class ends
+  // Janela de presença: disponível 10min antes do início até 30min após o término
   const [h, m] = (turma?.horario || '00:00').split(':').map(Number)
-  const endMins = h * 60 + m + 90
+  const startMins = h * 60 + m
+  const endMins = startMins + 90
   const nowMins = new Date().getHours() * 60 + new Date().getMinutes()
+  const notYetAvailable = nowMins < startMins - 10
   const isLocked = nowMins > endMins + 30
 
   const alunosTurma = useMemo(
-    () => alunos.filter(a => a.turma_id === turma?.id && a.status === 'Ativo'),
-    [alunos, turma]
+    () => alunos
+      .filter(a => a.turma_id === turma?.id && a.status === 'Ativo')
+      .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
+      .filter(a => a.nome.toLowerCase().includes(buscaPresenca.toLowerCase())),
+    [alunos, turma, buscaPresenca]
   )
 
   useEffect(() => {
@@ -131,10 +141,12 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
       ocorrencias: registro.ocorrencias,
       alunos_presentes: presentesCount,
       professor_id: profile?.id ?? null,
+      fotos: fotos.length > 0 ? fotos : null,
     }, { onConflict: 'turma_id,data' })
   }
 
   async function salvarAula() {
+    if (isLocked || notYetAvailable) return
     setSaving(true)
     await salvarPresenca()
     await salvarRegistro()
@@ -145,15 +157,17 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
   }
 
   async function handleFotoUpload(e) {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const files = Array.from(e.target.files ?? [])
+    if (!files.length) return
     setUploadingFoto(true)
-    const ext = file.name.split('.').pop()
-    const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-    const { error } = await supabase.storage.from('registros-aula').upload(filename, file)
-    if (!error) {
-      const { data } = supabase.storage.from('registros-aula').getPublicUrl(filename)
-      setFotos(f => [...f, data.publicUrl])
+    for (const file of files) {
+      const ext = file.name.split('.').pop()
+      const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+      const { error } = await supabase.storage.from('registros-aula').upload(filename, file)
+      if (!error) {
+        const { data } = supabase.storage.from('registros-aula').getPublicUrl(filename)
+        setFotos(f => [...f, data.publicUrl])
+      }
     }
     setUploadingFoto(false)
     e.target.value = ''
@@ -168,7 +182,12 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
       title={`${turma.modalidades?.emoji ?? '📚'} ${turma.modalidades?.nome ?? 'Turma'} · ${turma.dias?.join(', ') ?? ''} · ${turma.horario?.slice(0,5) ?? ''}`}
     >
       <div className="space-y-4">
-        {/* Lock banner */}
+        {/* Banners de disponibilidade */}
+        {notYetAvailable && (
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg px-3 py-2 text-xs text-blue-700 dark:text-blue-300 font-medium">
+            🕐 Lista de presença disponível a partir de {String(Math.floor((startMins - 10) / 60)).padStart(2,'0')}:{String((startMins - 10) % 60).padStart(2,'0')} (10 min antes do início).
+          </div>
+        )}
         {isLocked && (
           <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg px-3 py-2 text-xs text-amber-700 dark:text-amber-300 font-medium">🔒 Aula encerrada — registro não pode mais ser alterado.</div>
         )}
@@ -205,14 +224,29 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
             <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">Fotos da Aula</label>
             <div className="flex gap-2 flex-wrap">
               {fotos.map((url, i) => (
-                <img key={i} src={url} alt={`foto-${i}`} className="w-16 h-16 rounded-lg object-cover border border-slate-200 dark:border-navy-600" />
+                <div key={i} className="relative group">
+                  <img src={url} alt={`foto-${i}`} className="w-16 h-16 rounded-lg object-cover border border-slate-200 dark:border-navy-600" />
+                  <button
+                    onClick={() => setFotos(f => f.filter((_, idx) => idx !== i))}
+                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
               ))}
               {!isLocked && (
-                <label className={`w-16 h-16 rounded-lg border-2 border-dashed border-slate-200 dark:border-navy-600 flex flex-col items-center justify-center cursor-pointer hover:border-primary-400 transition-colors ${uploadingFoto ? 'opacity-50' : ''}`}>
-                  <Camera size={16} className="text-slate-400 mb-0.5" />
-                  <span className="text-[9px] text-slate-400">{uploadingFoto ? '...' : 'Foto'}</span>
-                  <input type="file" accept="image/*" className="hidden" onChange={handleFotoUpload} disabled={uploadingFoto} />
-                </label>
+                <div className="flex gap-2">
+                  <label className={`w-16 h-16 rounded-lg border-2 border-dashed border-slate-200 dark:border-navy-600 flex flex-col items-center justify-center cursor-pointer hover:border-primary-400 transition-colors ${uploadingFoto ? 'opacity-50' : ''}`}>
+                    <Camera size={16} className="text-slate-400 mb-0.5" />
+                    <span className="text-[9px] text-slate-400">{uploadingFoto ? '...' : 'Câmera'}</span>
+                    <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFotoUpload} disabled={uploadingFoto} />
+                  </label>
+                  <label className={`w-16 h-16 rounded-lg border-2 border-dashed border-primary-200 dark:border-primary-800 flex flex-col items-center justify-center cursor-pointer hover:border-primary-400 transition-colors ${uploadingFoto ? 'opacity-50' : ''}`}>
+                    <span className="text-xl">🖼️</span>
+                    <span className="text-[9px] text-slate-400">Galeria</span>
+                    <input type="file" accept="image/*" multiple className="hidden" onChange={handleFotoUpload} disabled={uploadingFoto} />
+                  </label>
+                </div>
               )}
             </div>
           </div>
@@ -228,7 +262,14 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
             </div>
             <div className="flex-1 h-px bg-slate-200 dark:bg-navy-600" />
           </div>
-          <div className="flex gap-2 mb-2">
+          <div className="flex gap-2 mb-3 flex-wrap">
+            <input
+              type="text"
+              placeholder="Buscar aluno..."
+              value={buscaPresenca}
+              onChange={e => setBuscaPresenca(e.target.value)}
+              className="flex-1 min-w-32 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-navy-600 bg-white dark:bg-navy-700 focus:outline-none focus:ring-1 focus:ring-primary-500"
+            />
             <button onClick={() => setPresencaMap(m => Object.fromEntries(Object.keys(m).map(k => [k, true])))}
               className="text-[10px] font-semibold text-primary-600 hover:text-primary-700 px-2 py-0.5 rounded border border-primary-200 dark:border-primary-700">Todos</button>
             <button onClick={() => setPresencaMap(m => Object.fromEntries(Object.keys(m).map(k => [k, false])))}
@@ -236,7 +277,7 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
           </div>
 
           {alunosTurma.length === 0 ? (
-            <div className="py-6 text-center text-sm text-slate-400">Nenhum aluno ativo nesta turma.</div>
+            <div className="py-6 text-center text-sm text-slate-400">{buscaPresenca ? 'Nenhum aluno encontrado.' : 'Nenhum aluno ativo nesta turma.'}</div>
           ) : (
             <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
               {alunosTurma.map(a => (
@@ -290,52 +331,202 @@ export default function PoloDetalhe() {
   const navigate = useNavigate()
   const { dark } = useTheme()
   const { isAdmin, isCoordenador, profile } = useAuth()
-  const canEdit = isAdmin || isCoordenador
+  const { offline, pending, addToQueue } = useOfflineQueue()
 
   const [tab, setTab] = useState('geral')
   const [aulaOpen, setAulaOpen] = useState(null)
 
   const { data: polos } = useSupabaseData('polos', '*')
-  const { data: turmas, reload: reloadTurmas } = useSupabaseData('turmas', '*, modalidades(nome,emoji), profiles(id,nome,cargo), polos(nome)')
+  const { data: turmas, reload: reloadTurmas, loading: loadingTurmas } = useSupabaseData('turmas', '*, modalidades(nome,emoji), profiles(id,nome,cargo), polos(nome)')
   const { data: alunos } = useSupabaseData('alunos', 'id,nome,status,turma_id,data_nasc,data_matricula')
   const { data: presencas, reload: reloadPresencas } = useSupabaseData('presencas', 'id,data,presente,turma_id,aluno_id')
   const { data: atestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id')
   const { data: viagens, reload: reloadViagens } = useSupabaseData('viagens', '*, turmas(*, modalidades(nome,emoji))')
   const { data: modalidades } = useSupabaseData('modalidades', 'id,nome,emoji')
   const { data: professores } = useSupabaseData('profiles', 'id,nome,cargo')
+  const { data: atribuicoes, loading: loadingAtribuicoes } = useSupabaseData('atribuicoes', 'usuario_id,polo_id,cargo')
   const { data: registros, reload: reloadRegistros } = useSupabaseData('registros_aula', 'id,turma_id,data,conteudo,ocorrencias,alunos_presentes')
 
-  // Nova turma form
+  // Nova / editar turma form
   const [turmaModalOpen, setTurmaModalOpen] = useState(false)
   const [turmaForm, setTurmaForm] = useState(EMPTY_TURMA_FORM)
+  const [editTurmaId, setEditTurmaId] = useState(null)
   const [savingTurma, setSavingTurma] = useState(false)
+  const [deleteTurmaTarget, setDeleteTurmaTarget] = useState(null)
+  const [deletingTurma, setDeletingTurma] = useState(false)
+
+  // Filtros registros de aula
+  const [regFiltroTurma, setRegFiltroTurma] = useState('')
+  const [regFiltroMod, setRegFiltroMod] = useState('')
+  const [regFiltroData, setRegFiltroData] = useState('')
+  const [regExpandido, setRegExpandido] = useState(false)
+
+  // Modal de atestados
+  const [atestadosModalOpen, setAtestadosModalOpen] = useState(false)
+  const [atestadosFiltro, setAtestadosFiltro] = useState('vencendo') // 'vencendo' ou 'vencido'
+
+  // Grupos expandidos (modalidade nome) — start collapsed
+  const [expandidos, setExpandidos] = useState(new Set())
+  function toggleColapso(nome) {
+    setExpandidos(prev => {
+      const next = new Set(prev)
+      next.has(nome) ? next.delete(nome) : next.add(nome)
+      return next
+    })
+  }
 
   // Viagem form
   const [viagemModalOpen, setViagemModalOpen] = useState(false)
   const [viagemTurma, setViagemTurma] = useState(null)
   const [viagemForm, setViagemForm] = useState({ destino: '', data: '', vagas: 20 })
   const [savingViagem, setSavingViagem] = useState(false)
+  const [editandoViagem, setEditandoViagem] = useState(null)
+  const [deletandoViagem, setDeletandoViagem] = useState(null)
 
   // Novo aluno direto do polo
-  const EMPTY_ALUNO = { nome: '', data_nasc: '', cpf: '', telefone: '', telefone_emergencia: '', email: '', status: 'Ativo', turma_id: '' }
+  const EMPTY_ALUNO = { nome: '', data_nasc: '', cpf: '', telefone: '', telefone_emergencia: '', email: '', status: 'Ativo', turma_id: '', genero: '', foto_url: '', atestado_validade: '', atestado_foto: '' }
   const [novoAlunoOpen, setNovoAlunoOpen] = useState(false)
   const [novoAlunoForm, setNovoAlunoForm] = useState(EMPTY_ALUNO)
   const [savingAluno, setSavingAluno] = useState(false)
+  const [uploadingFotoAluno, setUploadingFotoAluno] = useState(false)
+  const [uploadingAtestadoFoto, setUploadingAtestadoFoto] = useState(false)
+
+  // Novo funcionário direto do polo
+  const EMPTY_FUNC = { nome: '', email: '', senha: '', cargo: 'professor', telefone: '', vinculos: [{ polo_id: id, cargo: 'professor', turma_id: '' }] }
+  const [novoFuncOpen, setNovoFuncOpen] = useState(false)
+  const [novoFuncForm, setNovoFuncForm] = useState(EMPTY_FUNC)
+  const [criandoFunc, setCriandoFunc] = useState(false)
+  const [funcError, setFuncError] = useState('')
+  const [funcSuccess, setFuncSuccess] = useState(false)
+
+  function openNovoFunc() {
+    setNovoFuncForm({ ...EMPTY_FUNC, vinculos: [{ polo_id: id, cargo: 'professor', turma_id: '' }] })
+    setFuncError('')
+    setFuncSuccess(false)
+    setNovoFuncOpen(true)
+  }
+
+  async function handleCreateFunc() {
+    if (!novoFuncForm.nome || !novoFuncForm.email || !novoFuncForm.senha) return
+    setCriandoFunc(true)
+    setFuncError('')
+
+    if (!supabaseAdmin) {
+      setFuncError('Configuração admin não disponível.')
+      setCriandoFunc(false)
+      return
+    }
+
+    const { data, error } = await supabaseAdmin.auth.admin.createUser({
+      email: novoFuncForm.email,
+      password: novoFuncForm.senha,
+      email_confirm: true,
+    })
+
+    if (error || !data?.user) {
+      setFuncError(
+        error?.message?.includes('already been registered')
+          ? 'Este e-mail já está cadastrado.'
+          : (error?.message ?? 'Erro ao criar usuário')
+      )
+      setCriandoFunc(false)
+      return
+    }
+
+    const userId = data.user.id
+    await supabase.from('profiles').upsert({
+      id: userId,
+      nome: novoFuncForm.nome,
+      cargo: novoFuncForm.cargo,
+      telefone: novoFuncForm.telefone || null,
+      ativo: true,
+    }, { onConflict: 'id' })
+
+    for (const v of (novoFuncForm.vinculos ?? [])) {
+      if (!v.polo_id) continue
+      await supabase.from('atribuicoes').insert({
+        usuario_id: userId,
+        polo_id: v.polo_id,
+        turma_id: (v.cargo !== 'coordenador' && v.turma_id) ? v.turma_id : null,
+        cargo: v.cargo ?? 'professor',
+      })
+      if (v.cargo === 'professor' && v.turma_id) {
+        await supabase.from('turmas').update({ professor_id: userId }).eq('id', v.turma_id)
+      }
+    }
+
+    setCriandoFunc(false)
+    setFuncSuccess(true)
+    setTimeout(() => { setNovoFuncOpen(false); setFuncSuccess(false) }, 1500)
+  }
 
   const polo = polos.find(p => p.id === id)
   const turmasPolo = useMemo(() => turmas.filter(t => t.polo_id === id), [turmas, id])
 
-  // Verificar se professor tem acesso a este polo
+  // canEditPolo: admin global OU qualquer staff deste polo
+  const canEditPolo = useMemo(() => {
+    if (isAdmin) return true
+    if (!profile || loadingAtribuicoes) return false
+    return atribuicoes.some(a => a.usuario_id === profile?.id && a.polo_id === id)
+  }, [isAdmin, atribuicoes, loadingAtribuicoes, profile, id])
+
+  const canEditTurma = useMemo(() => (t) => {
+    if (isAdmin) return true
+    if (!profile) return false
+    // coordenador of this polo can edit any turma
+    const isCoord = atribuicoes.some(a => a.usuario_id === profile?.id && a.polo_id === id && a.cargo === 'coordenador')
+    if (isCoord) return true
+    // professor/estagiário can only edit turmas they're assigned to
+    return atribuicoes.some(a => a.usuario_id === profile?.id && a.turma_id === t.id)
+  }, [isAdmin, atribuicoes, profile, id])
+
+  // Acesso ao polo: admin, coordenador global, ou tem qualquer atribuição neste polo, ou professor de alguma turma aqui
   const temAcesso = useMemo(() => {
     if (isAdmin || isCoordenador) return true
+    if (!profile || loadingAtribuicoes || loadingTurmas) return true // ainda carregando, aguardar
+    if (atribuicoes.some(a => a.usuario_id === profile?.id && a.polo_id === id)) return true
     return turmasPolo.some(t => t.professor_id === profile?.id)
-  }, [isAdmin, isCoordenador, turmasPolo, profile])
+  }, [isAdmin, isCoordenador, atribuicoes, loadingAtribuicoes, loadingTurmas, profile, id, turmasPolo])
 
   useEffect(() => {
-    if (turmasPolo.length >= 0 && !temAcesso && polos.length > 0) {
+    if (!profile || loadingAtribuicoes || loadingTurmas) return // aguardar carregamento completo
+    if (!temAcesso && polos.length > 0) {
       navigate('/polos')
     }
-  }, [temAcesso, polos])
+  }, [temAcesso, polos, profile, loadingAtribuicoes, loadingTurmas])
+
+  // Auto-desativar alunos Melhor Idade com atestado vencido há 6+ meses
+  useEffect(() => {
+    async function desativarAlunosMelhorIdade() {
+      const hoje = new Date()
+      const ha6meses = new Date()
+      ha6meses.setMonth(hoje.getMonth() - 6)
+
+      // Alunos Melhor Idade (60+) das turmas do polo
+      const turmaIds = new Set(turmasPolo.map(t => t.id))
+      const alunosMelhorIdade = alunos.filter(a => {
+        if (!turmaIds.has(a.turma_id) || a.status !== 'Ativo') return false
+        if (!a.data_nasc) return false
+        return new Date().getFullYear() - new Date(a.data_nasc).getFullYear() >= 60
+      })
+
+      // Verificar atestados vencidos há 6+ meses
+      for (const aluno of alunosMelhorIdade) {
+        const atestadoAluno = atestados.find(a => a.aluno_id === aluno.id)
+        if (atestadoAluno) {
+          const dataValidade = new Date(atestadoAluno.data_validade)
+          if (dataValidade < ha6meses) {
+            // Atestado venceu há mais de 6 meses, desativar aluno
+            await supabase.from('alunos').update({ status: 'Inativo' }).eq('id', aluno.id)
+          }
+        }
+      }
+    }
+
+    if (turmasPolo.length > 0 && alunos.length > 0) {
+      desativarAlunosMelhorIdade()
+    }
+  }, [turmasPolo, alunos, atestados])
 
   const turmaIds = useMemo(() => new Set(turmasPolo.map(t => t.id)), [turmasPolo])
   const alunosPolo = useMemo(() => alunos.filter(a => turmaIds.has(a.turma_id)), [alunos, turmaIds])
@@ -364,8 +555,29 @@ export default function PoloDetalhe() {
     const cap = turmasPolo.filter(t => t.status === 'Ativa').reduce((s, t) => s + (t.capacidade || 0), 0)
     return cap ? Math.round((alunosAtivos / cap) * 100) : 0
   }, [turmasPolo, alunosAtivos])
-  const atestadosVencendo = atestadosPolo.filter(a => { const v = new Date(a.data_validade); return v >= hoje && v <= em30 }).length
-  const atestadosVencidos = atestadosPolo.filter(a => new Date(a.data_validade) < hoje).length
+  const atestadosVencendo = atestadosPolo.filter(a => {
+    const aluno = alunosPolo.find(al => al.id === a.aluno_id)
+    if (!aluno || aluno.status !== 'Ativo') return false
+    const v = new Date(a.data_validade)
+    return v >= hoje && v <= em30
+  }).length
+
+  const atestadosVencidos = atestadosPolo.filter(a => {
+    const aluno = alunosPolo.find(al => al.id === a.aluno_id)
+    if (!aluno || aluno.status !== 'Ativo') return false
+    return new Date(a.data_validade) < hoje
+  }).length
+
+  // Alunos com atestados vencendo/vencidos (apenas Ativos)
+  const alunosComAtestadosProblema = useMemo(() => {
+    const filtrados = atestadosFiltro === 'vencendo'
+      ? atestadosPolo.filter(a => { const v = new Date(a.data_validade); return v >= hoje && v <= em30 })
+      : atestadosPolo.filter(a => new Date(a.data_validade) < hoje)
+    return filtrados.map(att => {
+      const aluno = alunosPolo.find(a => a.id === att.aluno_id)
+      return { aluno, atestado: att }
+    }).filter(x => x.aluno && x.aluno.status === 'Ativo').sort((a, b) => (a.aluno.nome || '').localeCompare(b.aluno.nome || '', 'pt-BR'))
+  }, [atestadosPolo, alunosPolo, atestadosFiltro, hoje, em30])
 
   // Gráfico
   const ultimos7 = Array.from({ length: 7 }, (_, i) => {
@@ -411,42 +623,156 @@ export default function PoloDetalhe() {
   async function salvarTurma() {
     if (!turmaForm.modalidade_id || !turmaForm.horario || turmaForm.dias.length === 0) return
     setSavingTurma(true)
-    await supabase.from('turmas').insert({
+    const { data: novaTurma } = await supabase.from('turmas').insert({
       polo_id: id,
       modalidade_id: turmaForm.modalidade_id,
-      professor_id: turmaForm.professor_id || null,
+      professor_id: turmaForm.professores_ids[0] || null,
       dias: turmaForm.dias,
       horario: turmaForm.horario,
       faixa: turmaForm.faixa,
+      faixa_etaria: turmaForm.faixa_etaria || null,
       capacidade: Number(turmaForm.capacidade),
       status: turmaForm.status,
-    })
+    }).select('id').single()
+    // Inserir atribuições para cada professor/estagiário selecionado
+    if (novaTurma?.id && turmaForm.professores_ids.length > 0) {
+      const prof = professores.filter(p => turmaForm.professores_ids.includes(p.id))
+      await supabase.from('atribuicoes').insert(
+        prof.map(p => ({
+          usuario_id: p.id,
+          polo_id: id,
+          turma_id: novaTurma.id,
+          cargo: p.cargo === 'estagiario' ? 'estagiario' : 'professor',
+        }))
+      )
+    }
     setSavingTurma(false)
     setTurmaModalOpen(false)
+    setEditTurmaId(null)
     setTurmaForm(EMPTY_TURMA_FORM)
     reloadTurmas()
   }
 
-  // Viagem nova
+  function abrirEditTurma(e, t) {
+    e.stopPropagation()
+    setEditTurmaId(t.id)
+    setTurmaForm({
+      modalidade_id: t.modalidade_id ?? '',
+      professores_ids: [],
+      dias: t.dias ?? [],
+      horario: t.horario ?? '',
+      faixa: t.faixa ?? 'Infantil',
+      faixa_etaria: t.faixa_etaria ?? '',
+      capacidade: t.capacidade ?? 20,
+      status: t.status ?? 'Ativa',
+    })
+    setTurmaModalOpen(true)
+  }
+
+  async function salvarEditTurma() {
+    if (!editTurmaId || !turmaForm.modalidade_id || !turmaForm.horario || turmaForm.dias.length === 0) return
+    setSavingTurma(true)
+    await supabase.from('turmas').update({
+      modalidade_id: turmaForm.modalidade_id,
+      professor_id: turmaForm.professores_ids[0] || null,
+      dias: turmaForm.dias,
+      horario: turmaForm.horario,
+      faixa: turmaForm.faixa,
+      faixa_etaria: turmaForm.faixa_etaria || null,
+      capacidade: Number(turmaForm.capacidade),
+      status: turmaForm.status,
+    }).eq('id', editTurmaId)
+    if (turmaForm.professores_ids.length > 0) {
+      await supabase.from('atribuicoes').delete().eq('turma_id', editTurmaId)
+      const prof = professores.filter(p => turmaForm.professores_ids.includes(p.id))
+      await supabase.from('atribuicoes').insert(
+        prof.map(p => ({ usuario_id: p.id, polo_id: id, turma_id: editTurmaId, cargo: p.cargo === 'estagiario' ? 'estagiario' : 'professor' }))
+      )
+    }
+    setSavingTurma(false)
+    setTurmaModalOpen(false)
+    setEditTurmaId(null)
+    setTurmaForm(EMPTY_TURMA_FORM)
+    reloadTurmas()
+  }
+
+  async function handleDeleteTurma() {
+    if (!deleteTurmaTarget) return
+    setDeletingTurma(true)
+    await supabase.from('atribuicoes').delete().eq('turma_id', deleteTurmaTarget.id)
+    await supabase.from('presencas').delete().eq('turma_id', deleteTurmaTarget.id)
+    await supabase.from('registros_aula').delete().eq('turma_id', deleteTurmaTarget.id)
+    await supabase.from('alunos').update({ turma_id: null }).eq('turma_id', deleteTurmaTarget.id)
+    await supabase.from('turmas').delete().eq('id', deleteTurmaTarget.id)
+    setDeleteTurmaTarget(null)
+    setDeletingTurma(false)
+    reloadTurmas()
+  }
+
+  // Viagem nova/editar
   async function salvarViagem() {
     if (!viagemForm.destino || !viagemForm.data) return
     setSavingViagem(true)
-    await supabase.from('viagens').insert({
-      destino: viagemForm.destino,
-      data: viagemForm.data,
-      polo_id: id,
-      turma_id: viagemTurma?.id ?? null,
-      vagas: Number(viagemForm.vagas),
-    })
+    if (editandoViagem) {
+      await supabase.from('viagens').update({
+        destino: viagemForm.destino,
+        data: viagemForm.data,
+        vagas: Number(viagemForm.vagas),
+      }).eq('id', editandoViagem.id)
+    } else {
+      await supabase.from('viagens').insert({
+        destino: viagemForm.destino,
+        data: viagemForm.data,
+        polo_id: id,
+        turma_id: viagemTurma?.id ?? null,
+        vagas: Number(viagemForm.vagas),
+      })
+    }
     setSavingViagem(false)
     setViagemModalOpen(false)
     setViagemForm({ destino: '', data: '', vagas: 20 })
+    setEditandoViagem(null)
     reloadViagens()
+  }
+
+  // Deletar viagem
+  async function deletarViagem() {
+    if (!deletandoViagem) return
+    await supabase.from('viagens').delete().eq('id', deletandoViagem.id)
+    setDeletandoViagem(null)
+    reloadViagens()
+  }
+
+  async function uploadFotoAluno(file) {
+    if (!file) return
+    setUploadingFotoAluno(true)
+    const ext = file.name.split('.').pop()
+    const fn = `alunos/foto/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+    const { error } = await supabase.storage.from('registros-aula').upload(fn, file)
+    if (!error) {
+      const { data } = supabase.storage.from('registros-aula').getPublicUrl(fn)
+      setNovoAlunoForm(f => ({ ...f, foto_url: data.publicUrl }))
+    }
+    setUploadingFotoAluno(false)
+  }
+
+  async function uploadFotoAtestado(file) {
+    if (!file) return
+    setUploadingAtestadoFoto(true)
+    const ext = file.name.split('.').pop()
+    const fn = `atestados/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+    const { error } = await supabase.storage.from('atestados').upload(fn, file)
+    if (!error) {
+      const { data } = supabase.storage.from('atestados').getPublicUrl(fn)
+      setNovoAlunoForm(f => ({ ...f, atestado_foto: data.publicUrl }))
+    }
+    setUploadingAtestadoFoto(false)
   }
 
   async function salvarNovoAluno() {
     if (!novoAlunoForm.nome.trim()) return
     setSavingAluno(true)
+    const turmaMelhorIdade = turmasPolo.find(t => t.id === novoAlunoForm.turma_id)?.faixa === 'Melhor Idade'
     const payload = {
       nome: novoAlunoForm.nome.trim(),
       data_nasc: novoAlunoForm.data_nasc || null,
@@ -456,14 +782,37 @@ export default function PoloDetalhe() {
       email: novoAlunoForm.email || null,
       turma_id: novoAlunoForm.turma_id || null,
       status: novoAlunoForm.status,
+      genero: novoAlunoForm.genero || null,
+      foto_url: novoAlunoForm.foto_url || null,
     }
-    const { data } = await supabase.from('alunos').insert(payload).select('id').single()
-    if (data?.id && novoAlunoForm.turma_id) {
-      await supabase.from('aluno_turmas').insert({ aluno_id: data.id, turma_id: novoAlunoForm.turma_id })
+    try {
+      const { data } = await supabase.from('alunos').insert(payload).select('id').single()
+      if (data?.id) {
+        if (novoAlunoForm.turma_id) {
+          await supabase.from('aluno_turmas').insert({ aluno_id: data.id, turma_id: novoAlunoForm.turma_id })
+        }
+        if (turmaMelhorIdade && novoAlunoForm.atestado_validade) {
+          await supabase.from('atestados').insert({
+            aluno_id: data.id,
+            data_validade: novoAlunoForm.atestado_validade,
+            arquivo_url: novoAlunoForm.atestado_foto || null,
+          })
+        }
+      }
+      setSavingAluno(false)
+      setNovoAlunoOpen(false)
+      setNovoAlunoForm(EMPTY_ALUNO)
+    } catch (erro) {
+      if (offline || !navigator.onLine) {
+        addToQueue({ type: 'aluno', data: payload, turma_id: novoAlunoForm.turma_id, turmaMelhorIdade, atestado_validade: novoAlunoForm.atestado_validade, atestado_foto: novoAlunoForm.atestado_foto })
+        setSavingAluno(false)
+        setNovoAlunoOpen(false)
+        setNovoAlunoForm(EMPTY_ALUNO)
+      } else {
+        console.error('Erro ao salvar aluno:', erro)
+        setSavingAluno(false)
+      }
     }
-    setSavingAluno(false)
-    setNovoAlunoOpen(false)
-    setNovoAlunoForm(EMPTY_ALUNO)
   }
 
   const axisColor = dark ? '#475569' : '#94a3b8'
@@ -491,6 +840,13 @@ export default function PoloDetalhe() {
         }
       />
 
+      {offline && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 border-t border-amber-200 dark:border-amber-800/50 px-3 md:px-5 py-2 flex items-center gap-2 text-xs font-medium text-amber-700 dark:text-amber-300">
+          <Circle size={8} className="fill-current" />
+          Offline · {pending} registros pendentes
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto p-3 md:p-5 space-y-4">
         {/* Header do polo */}
         {polo && (
@@ -506,10 +862,15 @@ export default function PoloDetalhe() {
               <p className="text-xs text-slate-400 dark:text-slate-500">{polo.tipo}{polo.bairro ? ` · ${polo.bairro}` : ''}</p>
               {polo.endereco && <p className="text-[11px] text-slate-400 dark:text-slate-500">{polo.endereco}</p>}
             </div>
-            {canEdit && (
-              <Button size="sm" onClick={() => { setNovoAlunoForm(EMPTY_ALUNO); setNovoAlunoOpen(true) }}>
-                <Plus size={13}/> <span className="hidden sm:inline">Novo Aluno</span>
-              </Button>
+            {canEditPolo && (
+              <div className="flex gap-2">
+                <Button size="sm" variant="secondary" onClick={openNovoFunc}>
+                  <UserPlus size={13}/> <span className="hidden sm:inline">Novo Funcionário</span>
+                </Button>
+                <Button size="sm" onClick={() => { setNovoAlunoForm(EMPTY_ALUNO); setNovoAlunoOpen(true) }}>
+                  <Plus size={13}/> <span className="hidden sm:inline">Novo Aluno</span>
+                </Button>
+              </div>
             )}
           </div>
         )}
@@ -538,14 +899,14 @@ export default function PoloDetalhe() {
             </div>
 
             {atestadosVencendo > 0 && (
-              <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl px-4 py-3 text-xs text-amber-800 dark:text-amber-300 font-medium">
+              <button onClick={() => { setAtestadosFiltro('vencendo'); setAtestadosModalOpen(true) }} className="w-full text-left bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl px-4 py-3 text-xs text-amber-800 dark:text-amber-300 font-medium hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors">
                 ⚠️ {atestadosVencendo} atestado(s) vencendo nos próximos 30 dias
-              </div>
+              </button>
             )}
             {atestadosVencidos > 0 && (
-              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl px-4 py-3 text-xs text-red-700 dark:text-red-300 font-medium">
+              <button onClick={() => { setAtestadosFiltro('vencido'); setAtestadosModalOpen(true) }} className="w-full text-left bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl px-4 py-3 text-xs text-red-700 dark:text-red-300 font-medium hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors">
                 🚨 {atestadosVencidos} atestado(s) vencido(s) — alunos precisam renovar
-              </div>
+              </button>
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -599,41 +960,61 @@ export default function PoloDetalhe() {
               </div>
             </div>
 
-            {/* Modalidades e Turmas */}
+            {/* Modalidades e Turmas — agrupado e colapsável */}
             {porModalidade.length > 0 && (
               <div>
                 <p className="text-xs font-bold text-slate-400 dark:text-slate-600 uppercase tracking-widest mb-3">Modalidades e Turmas</p>
-                <div className="space-y-3">
-                  {porModalidade.map(mod => (
-                    <div key={mod.nome} className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="text-lg">{mod.emoji}</span>
-                        <p className="text-xs font-bold text-navy-900 dark:text-white">{mod.nome}</p>
-                        <span className="text-[10px] text-slate-400 ml-auto">{mod.turmas.length} turma{mod.turmas.length !== 1 ? 's' : ''}</span>
+                <div className="space-y-2">
+                  {porModalidade.map(mod => {
+                    const totalAlunos = mod.turmas.reduce((s, t) => s + alunos.filter(a => a.turma_id === t.id && a.status === 'Ativo').length, 0)
+                    const aberto = expandidos.has('geral-' + mod.nome)
+                    return (
+                      <div key={mod.nome} className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 overflow-hidden">
+                        {/* Cabeçalho clicável */}
+                        <button onClick={() => toggleColapso('geral-' + mod.nome)}
+                          className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-navy-700 transition-colors text-left">
+                          <span className="text-xl shrink-0">{mod.emoji}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold text-navy-900 dark:text-white">{mod.nome}</p>
+                            <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                              {mod.turmas.length} turma{mod.turmas.length !== 1 ? 's' : ''} · {totalAlunos} aluno{totalAlunos !== 1 ? 's' : ''} ativo{totalAlunos !== 1 ? 's' : ''}
+                            </p>
+                          </div>
+                          <ChevronRight size={14} className={`text-slate-400 shrink-0 transition-transform duration-200 ${aberto ? 'rotate-90' : ''}`} />
+                        </button>
+                        {/* Turmas */}
+                        {aberto && (
+                          <div className="px-3 pb-3 border-t border-slate-100 dark:border-navy-700 pt-3">
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                              {mod.turmas.map(t => {
+                                const cnt = alunos.filter(a => a.turma_id === t.id && a.status === 'Ativo').length
+                                const ocup = t.capacidade ? Math.round((cnt / t.capacidade) * 100) : 0
+                                return (
+                                  <button key={t.id} onClick={() => navigate(`/alunos?turma_id=${t.id}`)}
+                                    className="text-left p-2.5 rounded-lg bg-slate-50 dark:bg-navy-700 hover:bg-primary-50 dark:hover:bg-primary-900/20 border border-transparent hover:border-primary-200 dark:hover:border-primary-700 transition-all group">
+                                    <div className="flex items-center justify-between mb-1.5">
+                                      <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${t.status === 'Ativa' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-slate-200 text-slate-500 dark:bg-navy-600 dark:text-slate-400'}`}>{t.status}</span>
+                                      <span className="text-[9px] font-semibold text-primary-600 opacity-0 group-hover:opacity-100 transition-opacity">Ver →</span>
+                                    </div>
+                                    <p className="text-[10px] font-semibold text-navy-800 dark:text-slate-200 mb-1">{t.faixa}{t.faixa_etaria ? ` · ${t.faixa_etaria}` : ''}</p>
+                                    <div className="flex items-center gap-1 text-[9px] text-slate-500 dark:text-slate-400">
+                                      <Clock size={8}/>{t.dias?.join(', ') || '—'} · {t.horario?.slice(0,5)}
+                                    </div>
+                                    <div className="flex items-center justify-between mt-1.5">
+                                      <span className="text-[9px] text-slate-500 dark:text-slate-400 flex items-center gap-1"><Users size={8}/>{cnt}/{t.capacidade}</span>
+                                      <div className="w-12 h-1 bg-slate-200 dark:bg-navy-600 rounded-full overflow-hidden">
+                                        <div className="h-full bg-primary-500 rounded-full" style={{ width: `${ocup}%` }}/>
+                                      </div>
+                                    </div>
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {mod.turmas.map(t => {
-                          const cnt = alunos.filter(a => a.turma_id === t.id && a.status === 'Ativo').length
-                          return (
-                            <button key={t.id} onClick={() => navigate(`/alunos?turma_id=${t.id}`)}
-                              className="text-left p-3 rounded-lg bg-slate-50 dark:bg-navy-700 hover:bg-primary-50 dark:hover:bg-primary-900/20 border border-transparent hover:border-primary-200 dark:hover:border-primary-700 transition-all group">
-                              <div className="flex items-center justify-between mb-1">
-                                <Badge color={t.status === 'Ativa' ? 'green' : 'gray'}>{t.status}</Badge>
-                                <span className="text-[10px] font-semibold text-primary-600 opacity-0 group-hover:opacity-100 transition-opacity">Ver alunos →</span>
-                              </div>
-                              <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400 mt-1">
-                                <Clock size={9}/>{t.dias?.join(', ') || '—'}{t.horario ? ` · ${t.horario.slice(0,5)}` : ''}
-                              </div>
-                              <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
-                                <Users size={9}/>{cnt} ativo{cnt !== 1 ? 's' : ''} · cap. {t.capacidade}
-                              </div>
-                              {t.profiles && <p className="text-[10px] text-slate-400 mt-0.5 truncate">{t.profiles.nome}</p>}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             )}
@@ -644,9 +1025,9 @@ export default function PoloDetalhe() {
         {/* ─── OPERACIONAL ──────────────────────────────────────────── */}
         {tab === 'operacional' && (
           <div className="space-y-4">
-            {canEdit && (
+            {canEditPolo && (
               <div className="flex justify-end">
-                <Button size="sm" onClick={() => { setTurmaForm(EMPTY_TURMA_FORM); setTurmaModalOpen(true) }}>
+                <Button size="sm" onClick={() => { setEditTurmaId(null); setTurmaForm(EMPTY_TURMA_FORM); setTurmaModalOpen(true) }}>
                   <Plus size={13}/> Nova Turma
                 </Button>
               </div>
@@ -682,52 +1063,41 @@ export default function PoloDetalhe() {
                 Aulas de Hoje — {format(hoje, "EEEE, d 'de' MMMM", { locale: ptBR })}
               </p>
               {aulasHoje.length === 0 ? (
-                <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-8 text-center">
-                  <p className="text-sm text-slate-400 dark:text-slate-500">Nenhuma aula programada para hoje neste polo.</p>
+                <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-6 text-center">
+                  <p className="text-sm text-slate-400 dark:text-slate-500">Nenhuma aula programada para hoje.</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {aulasHoje.map(t => {
                     const isAgora = t.id === aulaAgora?.id
                     const alunosTurma = alunos.filter(a => a.turma_id === t.id && a.status === 'Ativo').length
                     const presencaHoje = presencas.filter(p => p.turma_id === t.id && p.data === new Date().toISOString().split('T')[0])
                     const jaRegistrou = presencaHoje.length > 0
                     const registroHoje = registros.find(r => r.turma_id === t.id && r.data === new Date().toISOString().split('T')[0])
-
                     return (
-                      <button
-                        key={t.id}
-                        onClick={() => setAulaOpen(t)}
-                        className={`text-left p-4 rounded-xl border transition-all ${
-                          isAgora
-                            ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700'
+                      <button key={t.id} onClick={() => setAulaOpen(t)}
+                        className={`text-left p-3 rounded-xl border transition-all ${
+                          isAgora ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700'
                             : 'bg-white dark:bg-navy-800 border-slate-200 dark:border-navy-700 hover:border-primary-200 dark:hover:border-primary-700'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-2 mb-2">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xl">{t.modalidades?.emoji ?? '📚'}</span>
-                            <div>
-                              <p className="text-xs font-bold text-navy-900 dark:text-white">{t.modalidades?.nome ?? '—'}</p>
-                              <p className="text-[10px] text-slate-400 dark:text-slate-500">{t.faixa}</p>
-                            </div>
+                        }`}>
+                        <div className="flex items-center gap-1.5 mb-1.5">
+                          <span className="text-base">{t.modalidades?.emoji ?? '📚'}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[11px] font-bold text-navy-900 dark:text-white truncate">{t.modalidades?.nome ?? '—'}</p>
+                            <p className="text-[9px] text-slate-400">{t.faixa}{t.faixa_etaria ? ` · ${t.faixa_etaria}` : ''}</p>
                           </div>
-                          {isAgora && <span className="text-[9px] bg-primary-600 text-white px-2 py-0.5 rounded-full font-bold">AGORA</span>}
+                          {isAgora && <span className="text-[8px] bg-primary-600 text-white px-1.5 py-0.5 rounded-full font-bold shrink-0">AGORA</span>}
                         </div>
-                        <div className="space-y-0.5">
-                          <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
-                            <Clock size={9}/>{t.horario?.slice(0,5) ?? '—'}
-                          </div>
-                          <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
-                            <Users size={9}/>{alunosTurma} alunos
-                          </div>
+                        <div className="text-[9px] text-slate-500 dark:text-slate-400 space-y-0.5">
+                          <div className="flex items-center gap-1"><Clock size={8}/>{t.horario?.slice(0,5)}</div>
+                          <div className="flex items-center gap-1"><Users size={8}/>{alunosTurma} alunos</div>
                         </div>
-                        <div className="flex items-center gap-2 mt-3">
+                        <div className="mt-2 text-[9px]">
                           {jaRegistrou
-                            ? <span className="flex items-center gap-1 text-[10px] text-primary-600 font-semibold"><CheckCircle2 size={11}/> Presença registrada</span>
-                            : <span className="text-[10px] text-slate-400">Toque para registrar</span>
+                            ? <span className="flex items-center gap-1 text-primary-600 font-semibold"><CheckCircle2 size={9}/> Presença ok</span>
+                            : <span className="text-slate-400">Toque p/ registrar</span>
                           }
-                          {registroHoje && <span className="flex items-center gap-1 text-[10px] text-primary-600 font-semibold"><CheckCircle2 size={11}/> Aula registrada</span>}
+                          {registroHoje && <span className="flex items-center gap-1 text-primary-600 font-semibold"><CheckCircle2 size={9}/> Aula ok</span>}
                         </div>
                       </button>
                     )
@@ -736,66 +1106,167 @@ export default function PoloDetalhe() {
               )}
             </div>
 
-            {/* Todas as turmas do polo */}
-            {turmasPolo.filter(t => !aulasHoje.find(a => a.id === t.id)).length > 0 && (
-              <div>
-                <p className="text-xs font-bold text-slate-400 dark:text-slate-600 uppercase tracking-widest mb-3">Outras Turmas — não acontecem hoje</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {turmasPolo.filter(t => !aulasHoje.find(a => a.id === t.id)).map(t => (
-                    <div key={t.id}
-                      className="text-left p-4 rounded-xl border bg-white dark:bg-navy-800 border-slate-200 dark:border-navy-700">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-lg">{t.modalidades?.emoji ?? '📚'}</span>
-                        <div>
-                          <p className="text-xs font-bold text-navy-900 dark:text-white">{t.modalidades?.nome ?? '—'}</p>
-                          <p className="text-[10px] text-slate-400 dark:text-slate-500">{t.dias?.join(', ')} · {t.horario?.slice(0,5)}</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Histórico de Aulas */}
-            {registros.filter(r => turmaIds.has(r.turma_id)).length > 0 && (
-              <div>
-                <p className="text-xs font-bold text-slate-400 dark:text-slate-600 uppercase tracking-widest mb-3">Histórico de Aulas</p>
-                <div className="space-y-2">
-                  {registros
-                    .filter(r => turmaIds.has(r.turma_id))
-                    .sort((a, b) => b.data.localeCompare(a.data))
-                    .map(r => {
-                      const turma = turmasPolo.find(t => t.id === r.turma_id)
-                      const presencasDia = presencas.filter(p => p.turma_id === r.turma_id && p.data === r.data)
-                      const presentes = presencasDia.filter(p => p.presente).length
-                      const total = presencasDia.length
+            {/* Todas as turmas — agrupadas por modalidade, colapsável */}
+            {turmasPolo.length > 0 && (() => {
+              const grupos = porModalidade.map(mod => ({
+                ...mod,
+                turmasAll: turmasPolo.filter(t => t.modalidade_id === mod.turmas[0]?.modalidade_id)
+              }))
+              // fallback: usar porModalidade direto
+              return (
+                <div>
+                  <p className="text-xs font-bold text-slate-400 dark:text-slate-600 uppercase tracking-widest mb-3">Todas as Turmas</p>
+                  <div className="space-y-2">
+                    {porModalidade.map(mod => {
+                      const totalAlunos = mod.turmas.reduce((s, t) => s + alunos.filter(a => a.turma_id === t.id && a.status === 'Ativo').length, 0)
+                      const aberto = expandidos.has('op-' + mod.nome)
                       return (
-                        <div key={r.id} className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
-                          <div className="flex items-start justify-between gap-3 mb-2">
-                            <div className="flex items-center gap-2">
-                              <span className="text-lg">{turma?.modalidades?.emoji ?? '📚'}</span>
-                              <div>
-                                <p className="text-xs font-bold text-navy-900 dark:text-white">{turma?.modalidades?.nome ?? '—'}</p>
-                                <p className="text-[10px] text-slate-400 dark:text-slate-500">{formatDate(r.data)}</p>
-                              </div>
+                        <div key={mod.nome} className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 overflow-hidden">
+                          {/* Cabeçalho */}
+                          <button onClick={() => toggleColapso('op-' + mod.nome)}
+                            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-navy-700 transition-colors text-left">
+                            <span className="text-xl shrink-0">{mod.emoji}</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-bold text-navy-900 dark:text-white">{mod.nome}</p>
+                              <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                                {mod.turmas.length} turma{mod.turmas.length !== 1 ? 's' : ''} · {totalAlunos} aluno{totalAlunos !== 1 ? 's' : ''} ativo{totalAlunos !== 1 ? 's' : ''}
+                              </p>
                             </div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] font-semibold text-primary-600">{presentes}/{total} presentes</span>
-                              <div className="w-16 h-1.5 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden">
-                                <div className="h-full bg-primary-600 rounded-full" style={{ width: `${total ? (presentes/total)*100 : 0}%` }} />
-                              </div>
+                            {canEditPolo && (
+                              <button onClick={e => { e.stopPropagation(); setEditTurmaId(null); setTurmaForm({ ...EMPTY_TURMA_FORM, modalidade_id: mod.turmas[0]?.modalidade_id ?? '' }); setTurmaModalOpen(true) }}
+                                className="flex items-center gap-1 text-[10px] font-semibold text-primary-600 hover:text-primary-700 px-2 py-1 rounded-lg hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors mr-1">
+                                <Plus size={11}/> Turma
+                              </button>
+                            )}
+                            <ChevronRight size={14} className={`text-slate-400 shrink-0 transition-transform duration-200 ${aberto ? 'rotate-90' : ''}`} />
+                          </button>
+                          {/* Turmas */}
+                          {aberto && (
+                            <div className="border-t border-slate-100 dark:border-navy-700">
+                              {mod.turmas.map((t, idx) => {
+                                const cnt = alunos.filter(a => a.turma_id === t.id && a.status === 'Ativo').length
+                                const ocup = t.capacidade ? Math.round((cnt / t.capacidade) * 100) : 0
+                                const eHoje = !!aulasHoje.find(a => a.id === t.id)
+                                return (
+                                  <div key={t.id} className={`flex items-center gap-3 px-4 py-3 ${idx > 0 ? 'border-t border-slate-100 dark:border-navy-700' : ''}`}>
+                                    {/* Info principal */}
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <p className="text-[11px] font-semibold text-navy-900 dark:text-white">{t.faixa}{t.faixa_etaria ? ` · ${t.faixa_etaria}` : ''}</p>
+                                        {eHoje && <span className="text-[8px] bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 px-1.5 py-0.5 rounded-full font-semibold">Hoje</span>}
+                                        {t.status === 'Inativa' && <span className="text-[8px] bg-slate-100 dark:bg-navy-600 text-slate-500 px-1.5 py-0.5 rounded-full font-semibold">Inativa</span>}
+                                      </div>
+                                      <div className="flex items-center gap-3 mt-0.5">
+                                        <span className="flex items-center gap-1 text-[9px] text-slate-500 dark:text-slate-400"><Clock size={8}/>{t.dias?.join(', ')} · {t.horario?.slice(0,5)}</span>
+                                        <span className="flex items-center gap-1 text-[9px] text-slate-500 dark:text-slate-400"><Users size={8}/>{cnt}/{t.capacidade}</span>
+                                        <div className="w-14 h-1 bg-slate-200 dark:bg-navy-600 rounded-full overflow-hidden">
+                                          <div className="h-full bg-primary-500 rounded-full" style={{ width: `${ocup}%` }}/>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    {/* Ações */}
+                                    {canEditTurma(t) && (
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <button onClick={e => abrirEditTurma(e, t)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-navy-600 text-slate-400 hover:text-primary-600 transition-colors">
+                                          <Pencil size={12}/>
+                                        </button>
+                                        <button onClick={e => { e.stopPropagation(); setDeleteTurmaTarget(t) }} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-500 transition-colors">
+                                          <Trash2 size={12}/>
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })}
                             </div>
-                          </div>
-                          {r.conteudo && <p className="text-[10px] text-slate-600 dark:text-slate-300 line-clamp-2">{r.conteudo}</p>}
-                          {r.ocorrencias && <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 line-clamp-1">⚠ {r.ocorrencias}</p>}
+                          )}
                         </div>
                       )
-                    })
-                  }
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
+              )
+            })()}
+
+            {/* Histórico de Aulas com filtros */}
+            {(() => {
+              const todosRegs = registros
+                .filter(r => turmaIds.has(r.turma_id))
+                .filter(r => {
+                  if (regFiltroTurma && r.turma_id !== regFiltroTurma) return false
+                  if (regFiltroData && r.data !== regFiltroData) return false
+                  if (regFiltroMod) {
+                    const t = turmasPolo.find(t => t.id === r.turma_id)
+                    if (t?.modalidade_id !== regFiltroMod) return false
+                  }
+                  return true
+                })
+                .sort((a, b) => b.data.localeCompare(a.data))
+              const visiveis = regExpandido ? todosRegs : todosRegs.slice(0, 5)
+              if (registros.filter(r => turmaIds.has(r.turma_id)).length === 0) return null
+              return (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-bold text-slate-400 dark:text-slate-600 uppercase tracking-widest">Histórico de Aulas</p>
+                    <span className="text-[10px] text-slate-400">{todosRegs.length} registro{todosRegs.length !== 1 ? 's' : ''}</span>
+                  </div>
+                  {/* Filtros */}
+                  <div className="grid grid-cols-3 gap-2 mb-3">
+                    <select value={regFiltroTurma} onChange={e => setRegFiltroTurma(e.target.value)}
+                      className="px-2 py-1.5 rounded-lg border border-slate-200 dark:border-navy-600 text-[11px] bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-primary-500">
+                      <option value="">Todas as turmas</option>
+                      {turmasPolo.map(t => <option key={t.id} value={t.id}>{t.modalidades?.emoji} {t.modalidades?.nome} · {t.horario?.slice(0,5)}</option>)}
+                    </select>
+                    <select value={regFiltroMod} onChange={e => setRegFiltroMod(e.target.value)}
+                      className="px-2 py-1.5 rounded-lg border border-slate-200 dark:border-navy-600 text-[11px] bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-primary-500">
+                      <option value="">Todas as modalidades</option>
+                      {modalidades.map(m => <option key={m.id} value={m.id}>{m.emoji} {m.nome}</option>)}
+                    </select>
+                    <input type="date" value={regFiltroData} onChange={e => setRegFiltroData(e.target.value)}
+                      className="px-2 py-1.5 rounded-lg border border-slate-200 dark:border-navy-600 text-[11px] bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-primary-500" />
+                  </div>
+                  {visiveis.length === 0 ? (
+                    <p className="text-xs text-slate-400 text-center py-4">Nenhum registro encontrado com esses filtros.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {visiveis.map(r => {
+                        const turma = turmasPolo.find(t => t.id === r.turma_id)
+                        const presencasDia = presencas.filter(p => p.turma_id === r.turma_id && p.data === r.data)
+                        const presentes = presencasDia.filter(p => p.presente).length
+                        const total = presencasDia.length
+                        return (
+                          <div key={r.id} className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-3">
+                            <div className="flex items-center justify-between gap-3 mb-1.5">
+                              <div className="flex items-center gap-2">
+                                <span className="text-base">{turma?.modalidades?.emoji ?? '📚'}</span>
+                                <div>
+                                  <p className="text-[11px] font-bold text-navy-900 dark:text-white">{turma?.modalidades?.nome ?? '—'}</p>
+                                  <p className="text-[9px] text-slate-400">{formatDate(r.data)} · {turma?.horario?.slice(0,5)}</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span className="text-[10px] font-semibold text-primary-600">{presentes}/{total}</span>
+                                <div className="w-12 h-1.5 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden">
+                                  <div className="h-full bg-primary-600 rounded-full" style={{ width: `${total ? (presentes/total)*100 : 0}%` }} />
+                                </div>
+                              </div>
+                            </div>
+                            {r.conteudo && <p className="text-[10px] text-slate-600 dark:text-slate-300 line-clamp-2">{r.conteudo}</p>}
+                            {r.ocorrencias && <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 line-clamp-1">⚠ {r.ocorrencias}</p>}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {todosRegs.length > 5 && (
+                    <button onClick={() => setRegExpandido(v => !v)}
+                      className="w-full mt-2 py-2 text-[11px] font-semibold text-primary-600 hover:text-primary-700 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-lg transition-colors">
+                      {regExpandido ? '▲ Mostrar menos' : `▼ Ver todos (${todosRegs.length - 5} mais)`}
+                    </button>
+                  )}
+                </div>
+              )
+            })()}
           </div>
         )}
 
@@ -836,7 +1307,7 @@ export default function PoloDetalhe() {
                           <p className="text-[10px] text-slate-400 dark:text-slate-500">{t.dias?.join(', ')} · {t.horario?.slice(0,5)} · {alunosTurma} alunos</p>
                         </div>
                       </div>
-                      {canEdit && (
+                      {canEditPolo && (
                         <Button size="sm" onClick={() => { setViagemTurma(t); setViagemModalOpen(true) }}>
                           <Bus size={13}/> Nova Viagem
                         </Button>
@@ -858,6 +1329,16 @@ export default function PoloDetalhe() {
                                 <p className="text-[10px] text-slate-400">{formatDate(v.data)} · {v.vagas} vagas</p>
                               </div>
                               <Badge color={passou ? 'gray' : 'green'}>{passou ? 'Realizada' : 'Próxima'}</Badge>
+                              {!passou && canEditPolo && (
+                                <div className="flex gap-1">
+                                  <button onClick={() => { setEditandoViagem(v); setViagemForm({ destino: v.destino, data: v.data, vagas: v.vagas }); setViagemModalOpen(true) }} className="p-1.5 rounded hover:bg-white dark:hover:bg-navy-600 transition-colors">
+                                    <Pencil size={13} className="text-primary-600" />
+                                  </button>
+                                  <button onClick={() => setDeletandoViagem(v)} className="p-1.5 rounded hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors">
+                                    <Trash2 size={13} className="text-red-500" />
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           )
                         })}
@@ -984,8 +1465,8 @@ export default function PoloDetalhe() {
         onSaved={() => { reloadPresencas(); reloadRegistros() }}
       />
 
-      {/* Modal Nova Turma */}
-      <Modal open={turmaModalOpen} onClose={() => setTurmaModalOpen(false)} title="Nova Turma" size="lg">
+      {/* Modal Nova / Editar Turma */}
+      <Modal open={turmaModalOpen} onClose={() => { setTurmaModalOpen(false); setEditTurmaId(null) }} title={editTurmaId ? 'Editar Turma' : 'Nova Turma'} size="lg">
         <div className="space-y-4">
           {/* Modalidade */}
           <div>
@@ -1024,12 +1505,22 @@ export default function PoloDetalhe() {
                 className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Faixa Etária</label>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Categoria</label>
               <select value={turmaForm.faixa} onChange={e => setTurmaForm(f => ({ ...f, faixa: e.target.value }))}
                 className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500">
                 {FAIXAS.map(f => <option key={f}>{f}</option>)}
               </select>
             </div>
+          </div>
+
+          {/* Faixa etária específica (opcional) */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+              Classificação de Idade <span className="font-normal text-slate-400">(opcional — ex: 6-9 anos, 10-12 anos)</span>
+            </label>
+            <input type="text" value={turmaForm.faixa_etaria} onChange={e => setTurmaForm(f => ({ ...f, faixa_etaria: e.target.value }))}
+              placeholder="Ex: 6-9 anos"
+              className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500" />
           </div>
 
           {/* Capacidade + Status */}
@@ -1049,30 +1540,58 @@ export default function PoloDetalhe() {
             </div>
           </div>
 
-          {/* Professor */}
+          {/* Professores / Estagiários */}
           <div>
-            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Professor Responsável</label>
-            <select value={turmaForm.professor_id} onChange={e => setTurmaForm(f => ({ ...f, professor_id: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500">
-              <option value="">Sem professor atribuído</option>
-              {professores.filter(p => p.cargo === 'professor' || p.cargo === 'coordenador').map(p => (
-                <option key={p.id} value={p.id}>{p.nome} ({p.cargo})</option>
-              ))}
-            </select>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+              Professores / Estagiários
+              {turmaForm.professores_ids.length > 0 && (
+                <span className="ml-2 text-primary-500 font-normal">{turmaForm.professores_ids.length} selecionado(s)</span>
+              )}
+            </label>
+            {(() => {
+              const disponiveis = professores.filter(p =>
+                (p.cargo === 'professor' || p.cargo === 'estagiario' || p.cargo === 'coordenador') &&
+                atribuicoes.some(a => a.usuario_id === p.id && a.polo_id === id)
+              )
+              if (disponiveis.length === 0) return (
+                <p className="text-xs text-slate-400 italic py-2">Nenhum professor ou estagiário cadastrado neste polo.</p>
+              )
+              return (
+                <div className="border border-slate-200 dark:border-navy-600 rounded-lg divide-y divide-slate-100 dark:divide-navy-600 max-h-40 overflow-y-auto">
+                  {disponiveis.map(p => {
+                    const sel = turmaForm.professores_ids.includes(p.id)
+                    return (
+                      <label key={p.id} className={`flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-slate-50 dark:hover:bg-navy-600 transition-colors ${sel ? 'bg-primary-50 dark:bg-primary-900/20' : ''}`}>
+                        <input type="checkbox" checked={sel}
+                          onChange={() => setTurmaForm(f => ({
+                            ...f,
+                            professores_ids: sel ? f.professores_ids.filter(x => x !== p.id) : [...f.professores_ids, p.id]
+                          }))}
+                          className="rounded border-slate-300 text-primary-600 focus:ring-primary-500" />
+                        <span className="text-sm text-navy-900 dark:text-white flex-1">{p.nome}</span>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${p.cargo === 'estagiario' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
+                          {p.cargo}
+                        </span>
+                      </label>
+                    )
+                  })}
+                </div>
+              )
+            })()}
           </div>
 
           <div className="flex gap-2 justify-end pt-2">
             <Button variant="secondary" size="sm" onClick={() => setTurmaModalOpen(false)}>Cancelar</Button>
-            <Button size="sm" onClick={salvarTurma}
+            <Button size="sm" onClick={editTurmaId ? salvarEditTurma : salvarTurma}
               disabled={savingTurma || !turmaForm.modalidade_id || !turmaForm.horario || turmaForm.dias.length === 0}>
-              {savingTurma ? 'Salvando...' : 'Criar Turma'}
+              {savingTurma ? 'Salvando...' : editTurmaId ? 'Salvar Alterações' : 'Criar Turma'}
             </Button>
           </div>
         </div>
       </Modal>
 
-      {/* Modal Nova Viagem */}
-      <Modal open={viagemModalOpen} onClose={() => setViagemModalOpen(false)} title="Nova Viagem">
+      {/* Modal Nova/Editar Viagem */}
+      <Modal open={viagemModalOpen} onClose={() => { setViagemModalOpen(false); setEditandoViagem(null); setViagemForm({ destino: '', data: '', vagas: 20 }) }} title={editandoViagem ? 'Editar Viagem' : 'Nova Viagem'}>
         <div className="space-y-3">
           {viagemTurma && (
             <div className="bg-slate-50 dark:bg-navy-700 rounded-lg px-3 py-2 text-xs text-slate-600 dark:text-slate-300">
@@ -1109,6 +1628,40 @@ export default function PoloDetalhe() {
       {/* Modal Novo Aluno (direto do polo) */}
       <Modal open={novoAlunoOpen} onClose={() => setNovoAlunoOpen(false)} title="Novo Aluno" size="lg">
         <div className="space-y-3">
+
+          {/* Foto do aluno */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Foto do Aluno</label>
+            <div className="flex items-center gap-4">
+              {novoAlunoForm.foto_url ? (
+                <div className="relative flex-shrink-0">
+                  <img src={novoAlunoForm.foto_url} alt="foto" className="w-16 h-16 rounded-full object-cover border-2 border-primary-200 dark:border-primary-700" />
+                  <button type="button" onClick={() => setNovoAlunoForm(f => ({ ...f, foto_url: '' }))}
+                    className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600">
+                    <X size={10}/>
+                  </button>
+                </div>
+              ) : (
+                <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-navy-700 flex items-center justify-center border-2 border-dashed border-slate-200 dark:border-navy-600 flex-shrink-0">
+                  <Camera size={20} className="text-slate-300 dark:text-slate-600" />
+                </div>
+              )}
+              <div className="flex flex-col gap-2">
+                <label className={`flex items-center gap-1.5 text-[11px] font-semibold text-primary-600 cursor-pointer hover:text-primary-700 ${uploadingFotoAluno ? 'opacity-50 pointer-events-none' : ''}`}>
+                  <Camera size={12}/> Tirar Foto
+                  <input type="file" accept="image/*" capture="environment" className="hidden"
+                    onChange={e => uploadFotoAluno(e.target.files?.[0])} />
+                </label>
+                <label className={`flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 cursor-pointer hover:text-slate-700 ${uploadingFotoAluno ? 'opacity-50 pointer-events-none' : ''}`}>
+                  <Upload size={12}/> Escolher da Galeria
+                  <input type="file" accept="image/*" className="hidden"
+                    onChange={e => uploadFotoAluno(e.target.files?.[0])} />
+                </label>
+                {uploadingFotoAluno && <p className="text-[10px] text-slate-400 animate-pulse">Enviando...</p>}
+              </div>
+            </div>
+          </div>
+
           <div>
             <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Nome <span className="text-red-400">*</span></label>
             <input type="text" value={novoAlunoForm.nome}
@@ -1161,6 +1714,17 @@ export default function PoloDetalhe() {
                 <option>Transferido</option>
               </select>
             </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Gênero</label>
+              <select value={novoAlunoForm.genero}
+                onChange={e => setNovoAlunoForm(f => ({ ...f, genero: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+                <option value="">Não informado</option>
+                <option value="M">Masculino</option>
+                <option value="F">Feminino</option>
+                <option value="Outro">Outro</option>
+              </select>
+            </div>
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Turma (neste polo)</label>
@@ -1175,6 +1739,42 @@ export default function PoloDetalhe() {
               ))}
             </select>
           </div>
+          {/* Atestado médico — somente para turmas Melhor Idade */}
+          {turmasPolo.find(t => t.id === novoAlunoForm.turma_id)?.faixa === 'Melhor Idade' && (
+            <div className="rounded-xl border border-amber-200 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-900/10 p-3 space-y-3">
+              <p className="text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wide">🏥 Atestado Médico — Melhor Idade</p>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Validade do Atestado</label>
+                <input type="date" value={novoAlunoForm.atestado_validade}
+                  onChange={e => setNovoAlunoForm(f => ({ ...f, atestado_validade: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-400" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Foto do Atestado</label>
+                {novoAlunoForm.atestado_foto ? (
+                  <div className="flex items-center gap-2">
+                    <a href={novoAlunoForm.atestado_foto} target="_blank" rel="noreferrer" className="text-[11px] text-primary-600 hover:underline">✓ Ver atestado enviado</a>
+                    <button type="button" onClick={() => setNovoAlunoForm(f => ({ ...f, atestado_foto: '' }))} className="text-[10px] text-red-400 hover:text-red-600">Remover</button>
+                  </div>
+                ) : (
+                  <div className="flex gap-3">
+                    <label className={`flex items-center gap-1.5 text-[11px] font-semibold text-primary-600 cursor-pointer hover:text-primary-700 ${uploadingAtestadoFoto ? 'opacity-50 pointer-events-none' : ''}`}>
+                      <Camera size={12}/> Fotografar
+                      <input type="file" accept="image/*" capture="environment" className="hidden"
+                        onChange={e => uploadFotoAtestado(e.target.files?.[0])} />
+                    </label>
+                    <label className={`flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 cursor-pointer hover:text-slate-700 ${uploadingAtestadoFoto ? 'opacity-50 pointer-events-none' : ''}`}>
+                      <Upload size={12}/> Galeria / PDF
+                      <input type="file" accept="image/*,.pdf" className="hidden"
+                        onChange={e => uploadFotoAtestado(e.target.files?.[0])} />
+                    </label>
+                    {uploadingAtestadoFoto && <p className="text-[10px] text-slate-400 animate-pulse">Enviando...</p>}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-2 justify-end pt-2">
             <Button variant="secondary" size="sm" onClick={() => setNovoAlunoOpen(false)}>Cancelar</Button>
             <Button size="sm" onClick={salvarNovoAluno} disabled={savingAluno || !novoAlunoForm.nome.trim()}>
@@ -1183,6 +1783,79 @@ export default function PoloDetalhe() {
           </div>
         </div>
       </Modal>
+
+      {/* Modal: Atestados (vencendo/vencidos) */}
+      <Modal open={atestadosModalOpen} onClose={() => setAtestadosModalOpen(false)} title={atestadosFiltro === 'vencendo' ? 'Atestados Vencendo' : 'Atestados Vencidos'} size="lg">
+        <div className="space-y-4">
+          {alunosComAtestadosProblema.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-6">Nenhum aluno encontrado.</p>
+          ) : (
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {alunosComAtestadosProblema.map(({ aluno, atestado }) => (
+                <div key={atestado.id} className={`flex items-center justify-between p-3 rounded-lg border ${
+                  atestadosFiltro === 'vencendo'
+                    ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-700'
+                    : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700'
+                }`}>
+                  <div className="flex-1">
+                    <p className={`text-sm font-semibold ${atestadosFiltro === 'vencendo' ? 'text-amber-800 dark:text-amber-300' : 'text-red-700 dark:text-red-300'}`}>
+                      {aluno.nome}
+                    </p>
+                    <p className={`text-xs ${atestadosFiltro === 'vencendo' ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}`}>
+                      Validade: {formatDate(atestado.data_validade)}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => navigate(`/alunos?turma_id=${alunos.find(a => a.id === atestado.aluno_id)?.turma_id}`)}
+                    className="text-xs px-2 py-1 rounded bg-primary-600 hover:bg-primary-700 text-white font-semibold"
+                  >
+                    Ver
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* Modal: Novo Funcionário (polo pré-preenchido) */}
+      <NovoFuncionarioModal
+        open={novoFuncOpen}
+        onClose={() => { if (!criandoFunc) setNovoFuncOpen(false) }}
+        form={novoFuncForm}
+        setForm={setNovoFuncForm}
+        onSave={handleCreateFunc}
+        creating={criandoFunc}
+        error={funcError}
+        success={funcSuccess}
+        cargos={isAdmin ? ['admin', 'coordenador', 'professor', 'estagiario']
+          : atribuicoes.some(a => a.usuario_id === profile?.id && a.polo_id === id && a.cargo === 'coordenador')
+            ? ['coordenador', 'professor', 'estagiario']
+            : ['professor', 'estagiario']}
+        polos={polos}
+        turmas={turmas}
+        prePoloId={id}
+      />
+
+      <ConfirmDialog
+        open={!!deletandoViagem}
+        title="Excluir viagem"
+        message={`Tem certeza que deseja excluir a viagem para ${deletandoViagem?.destino}?`}
+        confirmLabel="Excluir"
+        onConfirm={deletarViagem}
+        onCancel={() => setDeletandoViagem(null)}
+        danger
+      />
+
+      <ConfirmDialog
+        open={!!deleteTurmaTarget}
+        title="Excluir turma"
+        message={`Tem certeza que deseja excluir a turma de ${deleteTurmaTarget?.modalidades?.nome ?? 'esta modalidade'}? Os alunos vinculados perderão a turma mas não serão deletados.`}
+        confirmLabel={deletingTurma ? 'Excluindo...' : 'Excluir'}
+        onConfirm={handleDeleteTurma}
+        onCancel={() => setDeleteTurmaTarget(null)}
+        danger
+      />
     </div>
   )
 }

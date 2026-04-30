@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import { useSupabaseData } from '../hooks/useSupabaseData'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -11,14 +11,13 @@ import ConfirmDialog from '../components/ui/ConfirmDialog'
 import { MapPin, Plus, Pencil, Trash2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
-const TIPOS = ['Ginásio','Arena','Estádio','Complexo','Academia','Parque Aquático','Kartódromo','Museu','Centro','Mini Estádio']
+const TIPOS = ['Ginásio','Arena','Estádio','Complexo','Academia','Parque Aquático','Quadras','Museu','Centro','Mini Estádio']
 const EMPTY_FORM = { nome:'', tipo:'Ginásio', bairro:'', endereco:'', status:'Ativo' }
 
 export default function Polos() {
-  const { isAdmin, isCoordenador, profile } = useAuth()
+  const { isAdmin } = useAuth()
   const navigate = useNavigate()
   const { data: polos, loading, reload } = useSupabaseData('polos')
-  const { data: todasTurmas } = useSupabaseData('turmas', 'id,polo_id,professor_id')
   const [filtro, setFiltro] = useState('Todos')
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState(null)
@@ -26,14 +25,7 @@ export default function Polos() {
   const [deletando, setDeletando] = useState(null)
   const [saving, setSaving] = useState(false)
 
-  const meusPolos = useMemo(() => {
-    if (isAdmin || isCoordenador) return null
-    return new Set(todasTurmas.filter(t => t.professor_id === profile?.id).map(t => t.polo_id))
-  }, [todasTurmas, isAdmin, isCoordenador, profile])
-
-  const polosFiltradosPorAcesso = meusPolos !== null
-    ? polos.filter(p => meusPolos.has(p.id))
-    : polos
+  const polosFiltradosPorAcesso = polos
 
   const tipos = ['Todos', ...new Set(polosFiltradosPorAcesso.map(p => p.tipo))]
   const visiveis = filtro === 'Todos' ? polosFiltradosPorAcesso : polosFiltradosPorAcesso.filter(p => p.tipo === filtro)

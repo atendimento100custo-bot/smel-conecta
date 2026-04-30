@@ -260,6 +260,7 @@ export default function AlunoDetalhe() {
                   { icon: Mail, label: 'E-mail', value: aluno.email ?? '—' },
                   { icon: Calendar, label: 'Matrícula', value: formatDate(aluno.data_matricula) },
                   { icon: User, label: 'Status', value: aluno.status },
+                  { icon: User, label: 'Gênero', value: aluno.genero === 'M' ? 'Masculino' : aluno.genero === 'F' ? 'Feminino' : aluno.genero === 'Outro' ? 'Outro' : '—' },
                 ].map(({ icon: Icon, label, value }) => (
                   <div key={label} className="flex items-start gap-2">
                     <Icon size={13} className="text-slate-300 dark:text-slate-600 mt-0.5 flex-shrink-0" />

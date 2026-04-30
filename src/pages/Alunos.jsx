@@ -3,13 +3,15 @@ import { useState, useRef, useMemo } from 'react'
 import { useSupabaseData } from '../hooks/useSupabaseData'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
+import { useTheme } from '../contexts/ThemeContext'
+import { useOfflineQueue } from '../hooks/useOfflineQueue'
 import Topbar from '../components/Topbar'
 import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
 import Modal from '../components/ui/Modal'
 import EmptyState from '../components/ui/EmptyState'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
-import { Plus, Pencil, Trash2, Upload, FileText, CheckCircle2, ArrowLeft, ChevronRight, Search, Filter } from 'lucide-react'
+import { Plus, Pencil, Trash2, Upload, FileText, CheckCircle2, ArrowLeft, ChevronRight, Search, Filter, Circle } from 'lucide-react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 
 const EMPTY_FORM = {
@@ -22,6 +24,7 @@ const EMPTY_FORM = {
   endereco: '',
   foto_url: '',
   status: 'Ativo',
+  genero: '',
 }
 
 function calcIdade(dataNasc) {
@@ -57,6 +60,8 @@ function calcFaixa(dataNasc) {
 
 export default function Alunos() {
   const { isAdmin, isCoordenador, isProfessor, profile } = useAuth()
+  const { dark } = useTheme()
+  const { offline, pending, addToQueue } = useOfflineQueue()
   const canEdit = isAdmin || isCoordenador || isProfessor
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -162,6 +167,7 @@ export default function Alunos() {
       endereco: a.endereco ?? '',
       foto_url: a.foto_url ?? '',
       status: a.status ?? 'Ativo',
+      genero: a.genero ?? '',
     })
     // Load matriculas from aluno_turmas or fallback to turma_id
     const ats = a.aluno_turmas ?? []
@@ -199,23 +205,35 @@ export default function Alunos() {
       turma_id: primeiraTurmaId, // backward compat
       foto_url: form.foto_url || null,
       status: form.status,
+      genero: form.genero || null,
     }
-    let alunoId = editing?.id
-    if (editing) {
-      await supabase.from('alunos').update(payload).eq('id', editing.id)
-    } else {
-      const { data } = await supabase.from('alunos').insert(payload).select('id').single()
-      alunoId = data?.id
+    try {
+      let alunoId = editing?.id
+      if (editing) {
+        await supabase.from('alunos').update(payload).eq('id', editing.id)
+      } else {
+        const { data } = await supabase.from('alunos').insert(payload).select('id').single()
+        alunoId = data?.id
+      }
+      // Save aluno_turmas (junction)
+      if (alunoId) {
+        await supabase.from('aluno_turmas').delete().eq('aluno_id', alunoId)
+        const rows = matriculas.filter(m => m.turma_id).map(m => ({ aluno_id: alunoId, turma_id: m.turma_id }))
+        if (rows.length) await supabase.from('aluno_turmas').insert(rows)
+      }
+      setSaving(false)
+      setModalOpen(false)
+      reload()
+    } catch (erro) {
+      if (offline || !navigator.onLine) {
+        addToQueue({ type: 'aluno', data: payload, isEditing: !!editing, matriculas: matriculas.filter(m => m.turma_id) })
+        setSaving(false)
+        setModalOpen(false)
+      } else {
+        console.error('Erro ao salvar aluno:', erro)
+        setSaving(false)
+      }
     }
-    // Save aluno_turmas (junction)
-    if (alunoId) {
-      await supabase.from('aluno_turmas').delete().eq('aluno_id', alunoId)
-      const rows = matriculas.filter(m => m.turma_id).map(m => ({ aluno_id: alunoId, turma_id: m.turma_id }))
-      if (rows.length) await supabase.from('aluno_turmas').insert(rows)
-    }
-    setSaving(false)
-    setModalOpen(false)
-    reload()
   }
 
   async function handleDelete() {
@@ -313,6 +331,13 @@ export default function Alunos() {
         title={turmaLabel2 ? `Alunos — ${turmaLabel2}` : `Alunos · ${alunosVisiveis.length}`}
         action={topbarAction}
       />
+
+      {offline && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 border-t border-amber-200 dark:border-amber-800/50 px-3 md:px-5 py-2 flex items-center gap-2 text-xs font-medium text-amber-700 dark:text-amber-300">
+          <Circle size={8} className="fill-current" />
+          Offline · {pending} registros pendentes
+        </div>
+      )}
 
       <div className="px-3 md:px-5 pt-3 pb-0 space-y-2">
         <div className="relative">
@@ -583,6 +608,16 @@ export default function Alunos() {
                 <option>Ativo</option>
                 <option>Inativo</option>
                 <option>Transferido</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Gênero</label>
+              <select value={form.genero} onChange={e => setField('genero', e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
+                <option value="">Não informado</option>
+                <option value="M">Masculino</option>
+                <option value="F">Feminino</option>
+                <option value="Outro">Outro</option>
               </select>
             </div>
           </div>
