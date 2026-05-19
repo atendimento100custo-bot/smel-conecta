@@ -390,7 +390,7 @@ export default function PoloDetalhe() {
   const { data: atestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id')
   const { data: viagens, reload: reloadViagens } = useSupabaseData('viagens', '*, turmas(*, modalidades(nome,emoji))')
   const { data: modalidades } = useSupabaseData('modalidades', 'id,nome,emoji')
-  const { data: professores } = useSupabaseData('profiles', 'id,nome,cargo,telefone,email')
+  const { data: professores, reload: reloadProfessores } = useSupabaseData('profiles', 'id,nome,cargo,telefone,email')
   const { data: atribuicoes, loading: loadingAtribuicoes, reload: reloadAtribuicoes } = useSupabaseData('atribuicoes', 'id,usuario_id,polo_id,turma_id,cargo')
   const { data: registros, reload: reloadRegistros } = useSupabaseData('registros_aula', 'id,turma_id,data,conteudo,ocorrencias,alunos_presentes')
 
@@ -450,7 +450,9 @@ export default function PoloDetalhe() {
   async function handleSaveFunc() {
     if (!editFuncMembro) return
     setEditFuncSaving(true)
-    await supabase.from('profiles').update({
+    // Usa supabaseAdmin para garantir que cargo seja salvo mesmo com RLS
+    const client = supabaseAdmin ?? supabase
+    await client.from('profiles').update({
       nome: editFuncForm.nome,
       cargo: editFuncForm.cargo,
       telefone: editFuncForm.telefone || null,
@@ -466,6 +468,7 @@ export default function PoloDetalhe() {
     setEditFuncOpen(false)
     reloadTurmas()
     reloadAtribuicoes()
+    reloadProfessores()
   }
 
   function getAllowedCargos() {
@@ -548,6 +551,7 @@ export default function PoloDetalhe() {
       email: novoFuncForm.email,
       password: novoFuncForm.senha,
       email_confirm: true,
+      user_metadata: { nome: novoFuncForm.nome },
     })
 
     if (error || !data?.user) {
@@ -561,11 +565,12 @@ export default function PoloDetalhe() {
     }
 
     const userId = data.user.id
-    await supabase.from('profiles').upsert({
+    await supabaseAdmin.from('profiles').upsert({
       id: userId,
       nome: novoFuncForm.nome,
       cargo: novoFuncForm.cargo,
       telefone: novoFuncForm.telefone || null,
+      email: novoFuncForm.email || null,
       ativo: true,
     }, { onConflict: 'id' })
 
@@ -573,6 +578,7 @@ export default function PoloDetalhe() {
 
     setCriandoFunc(false)
     setFuncSuccess(true)
+    reloadProfessores()
     setTimeout(() => { setNovoFuncOpen(false); setFuncSuccess(false) }, 1500)
   }
 
