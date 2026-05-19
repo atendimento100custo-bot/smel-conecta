@@ -3,20 +3,42 @@ import { useState, useMemo } from 'react'
 import { useSupabaseData } from '../hooks/useSupabaseData'
 import { supabase, supabaseAdmin } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
+import { logAcao } from '../lib/auditLog'
 import Topbar from '../components/Topbar'
 import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
 import Modal from '../components/ui/Modal'
 import EmptyState from '../components/ui/EmptyState'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
-import { X, Phone, MapPin, BookOpen, Pencil, Trash2, UserPlus, Filter } from 'lucide-react'
+import { X, Phone, MapPin, BookOpen, Pencil, Trash2, UserPlus, Filter, Check, Plus } from 'lucide-react'
 
 const poloLabel = (p) => [p.tipo, p.bairro].filter(Boolean).join(' ') || p.nome || ''
+
+// Salva atribuições a partir da estrutura [{ polo_id, turma_ids: [] }]
+export async function salvarVinculos(userId, cargoGlobal, vinculos) {
+  for (const v of vinculos) {
+    if (!v.polo_id) continue
+    // 1 linha por polo (marca presença no polo, sem turma específica)
+    await supabase.from('atribuicoes').insert({
+      usuario_id: userId, polo_id: v.polo_id, cargo: cargoGlobal, turma_id: null,
+    })
+    // 1 linha por turma selecionada
+    for (const turmaId of (v.turma_ids ?? [])) {
+      await supabase.from('atribuicoes').insert({
+        usuario_id: userId, polo_id: v.polo_id, cargo: cargoGlobal, turma_id: turmaId,
+      })
+      // Atribui professor_id na turma (para professor e coordenador que leciona)
+      if (cargoGlobal !== 'admin') {
+        await supabase.from('turmas').update({ professor_id: userId }).eq('id', turmaId)
+      }
+    }
+  }
+}
 
 const CARGOS = ['professor', 'coordenador', 'estagiario', 'admin']
 const CARGO_LABELS = { professor: 'Professor', coordenador: 'Coordenador', estagiario: 'Estagiário', admin: 'Administrador' }
 const CARGO_COLORS = { professor: 'amber', coordenador: 'blue', estagiario: 'purple', admin: 'green' }
-const EMPTY_FORM = { nome: '', cargo: 'professor', telefone: '', email: '' }
+const EMPTY_FORM = { nome: '', cargo: 'professor', telefone: '', email: '', vinculos: [] }
 
 function getInitials(nome = '') {
   return nome.split(' ').slice(0, 2).map(n => n[0]).join('').toUpperCase() || '?'
@@ -28,10 +50,10 @@ export default function Equipes() {
   const { isAdmin, isCoordenador, profile } = useAuth()
   const canEdit = isAdmin || isCoordenador
 
-  const { data: membros, loading: loadingMembros, reload } = useSupabaseData('profiles', 'id,nome,cargo,telefone,ativo')
-  const { data: turmas, loading: loadingTurmas } = useSupabaseData('turmas', 'id,polo_id,professor_id,modalidades(nome,emoji),dias,horario')
+  const { data: membros, loading: loadingMembros, reload } = useSupabaseData('profiles', 'id,nome,cargo,telefone,email,ativo')
+  const { data: turmas, loading: loadingTurmas } = useSupabaseData('turmas', 'id,polo_id,professor_id,faixa,modalidades(nome,emoji),dias,horario')
   const { data: polos, loading: loadingPolos } = useSupabaseData('polos', 'id,nome,tipo,bairro')
-  const { data: atribuicoes } = useSupabaseData('atribuicoes', 'usuario_id,polo_id,cargo')
+  const { data: atribuicoes, reload: reloadAtribuicoes } = useSupabaseData('atribuicoes', 'id,usuario_id,polo_id,cargo,turma_id')
 
   const [filtroCargoEq, setFiltroCargoEq] = useState('')
   const [filtroPoloEq, setFiltroPoloEq] = useState('')
@@ -78,9 +100,14 @@ export default function Equipes() {
     }).filter(({ membros }) => membros.length > 0)
   }, [polos, atribuicoes, ativos])
 
-  // Turmas de um membro específico
+  // Turmas de um membro específico — via professor_id (professores) OU atribuicoes (estagiários/coordenadores)
   function turmasDeMembro(membroId) {
-    return turmas.filter(t => t.professor_id === membroId)
+    const turmaIdsViaAtrib = new Set(
+      atribuicoes
+        .filter(a => a.usuario_id === membroId && a.turma_id)
+        .map(a => a.turma_id)
+    )
+    return turmas.filter(t => t.professor_id === membroId || turmaIdsViaAtrib.has(t.id))
   }
 
   function getNomePolo(poloId) {
@@ -105,21 +132,52 @@ export default function Equipes() {
 
   function openEdit(m, e) {
     e?.stopPropagation()
-    setForm({ nome: m.nome, cargo: m.cargo, telefone: m.telefone ?? '', email: m.email ?? '' })
+    // Agrupa atribuições por polo → { polo_id, turma_ids: [] }
+    const poloMap = {}
+    for (const a of atribuicoes.filter(a => a.usuario_id === m.id)) {
+      if (!poloMap[a.polo_id]) poloMap[a.polo_id] = { polo_id: a.polo_id, turma_ids: [] }
+      if (a.turma_id) poloMap[a.polo_id].turma_ids.push(a.turma_id)
+    }
+    setForm({
+      nome: m.nome ?? '',
+      cargo: m.cargo ?? 'professor',
+      telefone: m.telefone ?? '',
+      email: m.email ?? '',
+      vinculos: Object.values(poloMap),
+    })
     setEditing(m)
     setEditModalOpen(true)
   }
 
   async function handleSave() {
     setSaving(true)
-    await supabase.from('profiles').update({ nome: form.nome, cargo: form.cargo, telefone: form.telefone || null }).eq('id', editing.id)
+    await supabase.from('profiles').update({
+      nome: form.nome,
+      cargo: form.cargo,
+      telefone: form.telefone || null,
+      email: form.email || null,
+    }).eq('id', editing.id)
+
     if (form.email && supabaseAdmin) {
       await supabaseAdmin.auth.admin.updateUserById(editing.id, { email: form.email })
     }
+
+    await supabase.from('turmas').update({ professor_id: null }).eq('professor_id', editing.id)
+    await supabase.from('atribuicoes').delete().eq('usuario_id', editing.id)
+
+    await salvarVinculos(editing.id, form.cargo, form.vinculos ?? [])
+
+    logAcao({
+      acao: 'edicao_funcionario',
+      perfil: profile,
+      detalhes: `${form.nome} (${form.cargo})`,
+    })
+
     setSaving(false)
     setEditModalOpen(false)
-    if (selectedMembro?.id === editing.id) setSelectedMembro(prev => ({ ...prev, ...form }))
+    if (selectedMembro?.id === editing.id) setSelectedMembro(prev => ({ ...prev, nome: form.nome, cargo: form.cargo, telefone: form.telefone }))
     reload()
+    reloadAtribuicoes()
   }
 
   // Cargo options based on current user role
@@ -153,6 +211,7 @@ export default function Equipes() {
       email: createForm.email,
       password: createForm.senha,
       email_confirm: true,
+      user_metadata: { nome: createForm.nome }, // evita trigger usar email como nome
     })
 
     if (error || !data?.user) {
@@ -167,27 +226,24 @@ export default function Equipes() {
 
     const userId = data.user.id
 
-    await supabase.from('profiles').upsert({
+    // Usa supabaseAdmin para garantir que cargo/nome sejam salvos corretamente
+    // independente do cargo do usuário logado (RLS bloquearia coordinator/professor)
+    await supabaseAdmin.from('profiles').upsert({
       id: userId,
       nome: createForm.nome,
       cargo: createForm.cargo,
       telefone: createForm.telefone || null,
+      email: createForm.email || null,
       ativo: true,
     }, { onConflict: 'id' })
 
-    // Salvar atribuições por polo (suporta múltiplos vínculos com cargos diferentes)
-    for (const v of (createForm.vinculos ?? [])) {
-      if (!v.polo_id) continue
-      await supabase.from('atribuicoes').insert({
-        usuario_id: userId,
-        polo_id: v.polo_id,
-        turma_id: (v.cargo !== 'coordenador' && v.turma_id) ? v.turma_id : null,
-        cargo: v.cargo ?? 'professor',
-      })
-      if (v.cargo === 'professor' && v.turma_id) {
-        await supabase.from('turmas').update({ professor_id: userId }).eq('id', v.turma_id)
-      }
-    }
+    await salvarVinculos(userId, createForm.cargo, createForm.vinculos ?? [])
+
+    logAcao({
+      acao: 'cadastro_funcionario',
+      perfil: profile,
+      detalhes: `${createForm.nome} (${createForm.cargo}) — ${createForm.email}`,
+    })
 
     setCreating(false)
     setCreateSuccess(true)
@@ -414,52 +470,18 @@ export default function Equipes() {
         </>
       )}
 
-      {/* Modal editar membro */}
-      <Modal open={editModalOpen} onClose={() => setEditModalOpen(false)} title="Editar Membro">
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Nome</label>
-            <input
-              value={form.nome}
-              onChange={e => setForm(f => ({ ...f, nome: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 bg-white dark:bg-navy-900 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">E-mail</label>
-            <input
-              type="email"
-              value={form.email}
-              onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-              placeholder="email@exemplo.com"
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 bg-white dark:bg-navy-900 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Cargo</label>
-            <select
-              value={form.cargo}
-              onChange={e => setForm(f => ({ ...f, cargo: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 bg-white dark:bg-navy-900 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-            >
-              {CARGOS.map(c => <option key={c} value={c}>{CARGO_LABELS[c]}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Telefone</label>
-            <input
-              value={form.telefone}
-              onChange={e => setForm(f => ({ ...f, telefone: e.target.value }))}
-              placeholder="(24) 99999-0000"
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 bg-white dark:bg-navy-900 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-            />
-          </div>
-          <div className="flex gap-2 justify-end pt-2">
-            <Button variant="secondary" size="sm" onClick={() => setEditModalOpen(false)}>Cancelar</Button>
-            <Button size="sm" onClick={handleSave} disabled={saving}>{saving ? 'Salvando...' : 'Salvar'}</Button>
-          </div>
-        </div>
-      </Modal>
+      {/* Modal editar membro — completo com atribuições */}
+      <EditarFuncionarioModal
+        open={editModalOpen}
+        onClose={() => setEditModalOpen(false)}
+        form={form}
+        setForm={setForm}
+        onSave={handleSave}
+        saving={saving}
+        cargos={getAllowedCargos()}
+        polos={polos}
+        turmas={turmas}
+      />
 
       <ConfirmDialog
         open={!!deletando}
@@ -487,132 +509,293 @@ export default function Equipes() {
   )
 }
 
-// ─── Shared modal for creating a new employee ────────────────────────────────
-const CARGO_LABELS_MODAL = { professor: 'Professor', coordenador: 'Coordenador', estagiario: 'Estagiário', admin: 'Administrador' }
-const ATRIB_CARGOS = ['coordenador', 'professor', 'estagiario']
+const CARGO_LABELS_ALL = { professor: 'Professor', coordenador: 'Coordenador', estagiario: 'Estagiário', admin: 'Administrador' }
 
-export function NovoFuncionarioModal({ open, onClose, form, setForm, onSave, creating, error, success, cargos, polos, turmas, prePoloId }) {
+// ─── Card de um polo com seleção de turmas ────────────────────────────────────
+const FAIXA_ORDER = { 'Infantil': 0, 'Adulto': 1, 'Melhor Idade': 2 }
+
+function PoloCard({ v, idx, polos, turmas, cargoGlobal, onChange, onRemove, poloLocked, prePoloId }) {
   const ic = 'w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 bg-white dark:bg-navy-900 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 text-navy-900 dark:text-white'
-  const poloLocked = !!prePoloId
-  const vinculos = form.vinculos ?? []
-  const showVinculos = form.cargo !== 'admin'
+  const polo_id = poloLocked ? prePoloId : v.polo_id
+  const turmasPolo = turmas
+    .filter(t => t.polo_id === polo_id)
+    .sort((a, b) => {
+      const modA = a.modalidades?.nome ?? ''
+      const modB = b.modalidades?.nome ?? ''
+      const modCmp = modA.localeCompare(modB, 'pt-BR')
+      if (modCmp !== 0) return modCmp
+      const fa = FAIXA_ORDER[a.faixa] ?? 99
+      const fb = FAIXA_ORDER[b.faixa] ?? 99
+      if (fa !== fb) return fa - fb
+      return (a.horario ?? '').localeCompare(b.horario ?? '')
+    })
+  const isCoord = cargoGlobal === 'coordenador'
 
-  function addVinculo() {
-    setForm(f => ({ ...f, vinculos: [...(f.vinculos ?? []), { polo_id: prePoloId || '', cargo: 'professor', turma_id: '' }] }))
-  }
-
-  function updateVinculo(idx, field, value) {
-    setForm(f => ({
-      ...f,
-      vinculos: (f.vinculos ?? []).map((v, i) =>
-        i === idx ? { ...v, [field]: value, ...(field === 'polo_id' ? { turma_id: '' } : {}), ...(field === 'cargo' ? { turma_id: '' } : {}) } : v
-      )
-    }))
-  }
-
-  function removeVinculo(idx) {
-    setForm(f => ({ ...f, vinculos: (f.vinculos ?? []).filter((_, i) => i !== idx) }))
+  function toggleTurma(turmaId) {
+    const ids = v.turma_ids ?? []
+    const next = ids.includes(turmaId) ? ids.filter(id => id !== turmaId) : [...ids, turmaId]
+    onChange({ ...v, polo_id: polo_id, turma_ids: next })
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Novo Funcionário" size="md">
-      <div className="space-y-3">
+    <div className="rounded-xl border border-slate-200 dark:border-navy-700 overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between bg-slate-50 dark:bg-navy-800 px-4 py-2.5 border-b border-slate-200 dark:border-navy-700">
+        <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
+          Polo {idx + 1}
+        </span>
+        <button type="button" onClick={onRemove}
+          className="p-1 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+          <X size={13} />
+        </button>
+      </div>
 
-        {/* Nome */}
+      <div className="p-4 space-y-4">
+        {/* Seletor de polo */}
+        {poloLocked ? (
+          <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 dark:bg-navy-800 border border-slate-200 dark:border-navy-600 rounded-lg">
+            <MapPin size={13} className="text-slate-400 flex-shrink-0" />
+            <span className="text-sm font-medium text-navy-800 dark:text-slate-200">
+              {polos.find(p => p.id === prePoloId)?.nome ?? '—'}
+            </span>
+          </div>
+        ) : (
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wide mb-1.5">Polo</label>
+            <select value={v.polo_id ?? ''} onChange={e => onChange({ ...v, polo_id: e.target.value, turma_ids: [] })} className={ic}>
+              <option value="">Selecionar polo...</option>
+              {polos.map(p => <option key={p.id} value={p.id}>{poloLabel(p)}</option>)}
+            </select>
+          </div>
+        )}
+
+        {/* Coordenador: badge informativo */}
+        {isCoord && polo_id && (
+          <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/40 rounded-lg">
+            <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">Coordenador deste polo</span>
+            <span className="text-[10px] text-blue-500 dark:text-blue-400">· pode também lecionar turmas abaixo</span>
+          </div>
+        )}
+
+        {/* Turmas — checkboxes */}
+        {polo_id && (
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wide mb-2">
+              {isCoord ? 'Turmas que também leciona' : 'Turmas'}
+            </label>
+            {turmasPolo.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">Nenhuma turma cadastrada neste polo.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {turmasPolo.map(t => {
+                  const selected = (v.turma_ids ?? []).includes(t.id)
+                  const dias = Array.isArray(t.dias) ? t.dias.join(', ') : (t.dias ?? '')
+                  return (
+                    <button key={t.id} type="button" onClick={() => toggleTurma(t.id)}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border text-left transition-all ${
+                        selected
+                          ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-200 dark:border-primary-700'
+                          : 'bg-white dark:bg-navy-900 border-slate-200 dark:border-navy-600 hover:border-slate-300 dark:hover:border-navy-500'
+                      }`}>
+                      {/* Checkbox visual */}
+                      <span className={`w-4 h-4 rounded flex-shrink-0 flex items-center justify-center border transition-colors ${
+                        selected ? 'bg-primary-600 border-primary-600' : 'border-slate-300 dark:border-navy-500'
+                      }`}>
+                        {selected && <Check size={10} className="text-white" strokeWidth={3} />}
+                      </span>
+                      {/* Info da turma */}
+                      <span className="flex-1 min-w-0">
+                        <span className={`text-xs font-semibold block ${selected ? 'text-primary-800 dark:text-primary-200' : 'text-navy-900 dark:text-white'}`}>
+                          {t.modalidades?.emoji ?? '📚'} {t.modalidades?.nome ?? 'Turma'}
+                        </span>
+                        {(dias || t.horario) && (
+                          <span className={`text-[10px] ${selected ? 'text-primary-600 dark:text-primary-400' : 'text-slate-400'}`}>
+                            {dias}{dias && t.horario ? ' · ' : ''}{t.horario?.slice(0, 5)}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Seção de atribuições ─────────────────────────────────────────────────────
+function AtribuicoesSection({ vinculos, setVinculos, polos, turmas, cargoGlobal, poloLocked, prePoloId }) {
+  const list = vinculos ?? []
+
+  function addPolo() {
+    setVinculos([...list, { polo_id: prePoloId ?? '', turma_ids: [] }])
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
         <div>
-          <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Nome completo <span className="text-red-400">*</span></label>
-          <input type="text" value={form.nome} onChange={e => setForm(f => ({ ...f, nome: e.target.value }))} placeholder="Ex.: Maria Oliveira" className={ic} />
+          <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">Polos e Turmas</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">Onde este funcionário atua</p>
+        </div>
+        {!poloLocked && (
+          <button type="button" onClick={addPolo}
+            className="flex items-center gap-1.5 text-[11px] font-semibold text-primary-600 hover:text-primary-700 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 hover:bg-primary-100 px-2.5 py-1.5 rounded-lg transition-colors">
+            <Plus size={12} /> Adicionar polo
+          </button>
+        )}
+      </div>
+
+      {list.length === 0 ? (
+        <div className="rounded-xl border-2 border-dashed border-slate-200 dark:border-navy-600 py-6 flex flex-col items-center gap-2 text-slate-400">
+          <MapPin size={18} className="opacity-40" />
+          <p className="text-xs">Nenhum polo atribuído</p>
+          {!poloLocked && (
+            <button type="button" onClick={addPolo} className="text-[11px] text-primary-600 hover:underline font-semibold">
+              + Adicionar polo
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {list.map((v, idx) => (
+            <PoloCard
+              key={idx}
+              v={v}
+              idx={idx}
+              polos={polos}
+              turmas={turmas}
+              cargoGlobal={cargoGlobal}
+              onChange={updated => setVinculos(list.map((x, i) => i === idx ? updated : x))}
+              onRemove={() => setVinculos(list.filter((_, i) => i !== idx))}
+              poloLocked={poloLocked}
+              prePoloId={prePoloId}
+            />
+          ))}
+          {poloLocked && (
+            <button type="button" onClick={addPolo}
+              className="w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold text-primary-600 hover:text-primary-700 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 hover:bg-primary-100 px-2.5 py-2 rounded-lg transition-colors border border-dashed border-primary-200 dark:border-primary-800">
+              <Plus size={12} /> Adicionar outro polo
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Modal editar funcionário ─────────────────────────────────────────────────
+export function EditarFuncionarioModal({ open, onClose, form, setForm, onSave, saving, cargos, polos, turmas }) {
+  const ic = 'w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 bg-white dark:bg-navy-900 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 text-navy-900 dark:text-white'
+  const noAuto = { autoComplete: 'new-password', readOnly: true, onFocus: e => e.currentTarget.removeAttribute('readonly') }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Editar Funcionário" size="md">
+      <div className="space-y-4">
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Nome completo</label>
+          <input type="text" {...noAuto} value={form.nome ?? ''} onChange={e => setForm(f => ({ ...f, nome: e.target.value }))} className={ic} />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">E-mail</label>
+            <input type="text" {...noAuto} value={form.email ?? ''} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="email@exemplo.com" className={ic} />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Telefone</label>
+            <input type="text" {...noAuto} value={form.telefone ?? ''} onChange={e => setForm(f => ({ ...f, telefone: e.target.value }))} placeholder="(24) 99999-0000" className={ic} />
+          </div>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Nível de acesso</label>
+          <select value={form.cargo ?? 'professor'}
+            onChange={e => setForm(f => ({ ...f, cargo: e.target.value, vinculos: e.target.value === 'admin' ? [] : (f.vinculos ?? []) }))}
+            className={ic}>
+            {cargos.map(c => <option key={c} value={c}>{CARGO_LABELS_ALL[c]}</option>)}
+          </select>
         </div>
 
-        {/* Email + Senha */}
+        {form.cargo !== 'admin' && (
+          <>
+            <div className="border-t border-slate-100 dark:border-navy-700" />
+            <AtribuicoesSection
+              vinculos={form.vinculos ?? []}
+              setVinculos={vs => setForm(f => ({ ...f, vinculos: vs }))}
+              polos={polos}
+              turmas={turmas}
+              cargoGlobal={form.cargo ?? 'professor'}
+            />
+          </>
+        )}
+
+        <div className="flex gap-2 justify-end pt-1">
+          <Button variant="secondary" size="sm" onClick={onClose} disabled={saving}>Cancelar</Button>
+          <Button size="sm" onClick={onSave} disabled={saving || !form.nome}>
+            {saving ? 'Salvando...' : 'Salvar'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+// ─── Modal criar novo funcionário ─────────────────────────────────────────────
+export function NovoFuncionarioModal({ open, onClose, form, setForm, onSave, creating, error, success, cargos, polos, turmas, prePoloId }) {
+  const ic = 'w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 bg-white dark:bg-navy-900 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 text-navy-900 dark:text-white'
+  const noAuto = { autoComplete: 'new-password', readOnly: true, onFocus: e => e.currentTarget.removeAttribute('readonly') }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Novo Funcionário" size="md">
+      <div className="space-y-4">
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Nome completo <span className="text-red-400">*</span></label>
+          <input type="text" {...noAuto} value={form.nome ?? ''} onChange={e => setForm(f => ({ ...f, nome: e.target.value }))} placeholder="Ex.: Maria Oliveira" className={ic} />
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">E-mail <span className="text-red-400">*</span></label>
-            <input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="email@exemplo.com" className={ic} />
+            <input type="text" {...noAuto} value={form.email ?? ''} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="email@exemplo.com" className={ic} />
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Senha inicial <span className="text-red-400">*</span></label>
-            <input type="password" value={form.senha} onChange={e => setForm(f => ({ ...f, senha: e.target.value }))} placeholder="Mín. 6 caracteres" className={ic} />
+            <input type="password" autoComplete="new-password" value={form.senha ?? ''} onChange={e => setForm(f => ({ ...f, senha: e.target.value }))} placeholder="Mín. 6 caracteres" className={ic} />
           </div>
         </div>
-
-        {/* Cargo global + Telefone */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Nível de acesso <span className="text-red-400">*</span></label>
-            <select
-              value={form.cargo}
+            <select value={form.cargo ?? 'professor'}
               onChange={e => setForm(f => ({ ...f, cargo: e.target.value, vinculos: e.target.value === 'admin' ? [] : (f.vinculos ?? []) }))}
-              className={ic}
-            >
-              {cargos.map(c => <option key={c} value={c}>{CARGO_LABELS_MODAL[c]}</option>)}
+              className={ic}>
+              {cargos.map(c => <option key={c} value={c}>{CARGO_LABELS_ALL[c]}</option>)}
             </select>
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Telefone <span className="text-slate-400 font-normal">(opcional)</span></label>
-            <input type="tel" value={form.telefone} onChange={e => setForm(f => ({ ...f, telefone: e.target.value }))} placeholder="(24) 99999-0000" className={ic} />
+            <input type="text" {...noAuto} value={form.telefone ?? ''} onChange={e => setForm(f => ({ ...f, telefone: e.target.value }))} placeholder="(24) 99999-0000" className={ic} />
           </div>
         </div>
 
-        {/* ── Atribuições por polo ─────────────────────────────────── */}
-        {showVinculos && (
-          <div className="border border-slate-200 dark:border-navy-600 rounded-xl p-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-semibold text-slate-600 dark:text-slate-400">Atribuições por polo <span className="text-slate-400 font-normal">(opcional)</span></p>
-              <button type="button" onClick={addVinculo} className="text-[11px] font-semibold text-primary-600 hover:text-primary-700 dark:text-primary-400">
-                + Adicionar
-              </button>
-            </div>
-
-            {vinculos.length === 0 && (
-              <p className="text-[11px] text-slate-400 italic">Nenhuma atribuição adicionada.</p>
-            )}
-
-            {vinculos.map((v, idx) => (
-              <div key={idx} className="flex gap-1.5 items-center bg-slate-50 dark:bg-navy-800 rounded-lg p-2 flex-wrap">
-                {/* Polo */}
-                {poloLocked ? (
-                  <span className="text-xs font-medium text-navy-800 dark:text-slate-200 px-1 flex-shrink-0">
-                    📍 {polos.find(p => p.id === prePoloId)?.nome ?? '—'}
-                  </span>
-                ) : (
-                  <select value={v.polo_id} onChange={e => updateVinculo(idx, 'polo_id', e.target.value)} className={`${ic} text-[11px] py-1.5 flex-1 min-w-[110px]`}>
-                    <option value="">— Polo —</option>
-                    {polos.map(p => <option key={p.id} value={p.id}>{poloLabel(p)}</option>)}
-                  </select>
-                )}
-
-                {/* Cargo no polo */}
-                <select value={v.cargo ?? 'professor'} onChange={e => updateVinculo(idx, 'cargo', e.target.value)} className={`${ic} text-[11px] py-1.5 flex-1 min-w-[110px]`}>
-                  {ATRIB_CARGOS.map(c => <option key={c} value={c}>{CARGO_LABELS_MODAL[c]}</option>)}
-                </select>
-
-                {/* Turma (só para professor e estagiário) */}
-                {v.cargo !== 'coordenador' && v.polo_id && (
-                  <select value={v.turma_id ?? ''} onChange={e => updateVinculo(idx, 'turma_id', e.target.value)} className={`${ic} text-[11px] py-1.5 flex-1 min-w-[120px]`}>
-                    <option value="">— Turma —</option>
-                    {turmas.filter(t => t.polo_id === v.polo_id).map(t => (
-                      <option key={t.id} value={t.id}>
-                        {t.modalidades?.emoji ?? '📚'} {t.modalidades?.nome ?? 'Turma'}{t.horario ? ` · ${t.horario.slice(0,5)}` : ''}
-                      </option>
-                    ))}
-                  </select>
-                )}
-
-                <button type="button" onClick={() => removeVinculo(idx)} className="p-1 text-slate-400 hover:text-red-500 flex-shrink-0">
-                  <X size={13} />
-                </button>
-              </div>
-            ))}
-          </div>
+        {form.cargo !== 'admin' && (
+          <>
+            <div className="border-t border-slate-100 dark:border-navy-700" />
+            <AtribuicoesSection
+              vinculos={form.vinculos ?? []}
+              setVinculos={vs => setForm(f => ({ ...f, vinculos: vs }))}
+              polos={polos}
+              turmas={turmas}
+              cargoGlobal={form.cargo ?? 'professor'}
+              poloLocked={!!prePoloId}
+              prePoloId={prePoloId}
+            />
+          </>
         )}
 
-        {error && (
-          <p className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2">{error}</p>
-        )}
-        {success && (
-          <p className="text-xs text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg px-3 py-2">✓ Funcionário criado com sucesso!</p>
-        )}
+        {error && <p className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2">{error}</p>}
+        {success && <p className="text-xs text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg px-3 py-2">✓ Funcionário criado com sucesso!</p>}
 
         <div className="flex gap-2 justify-end pt-1">
           <Button variant="secondary" size="sm" onClick={onClose} disabled={creating}>Cancelar</Button>

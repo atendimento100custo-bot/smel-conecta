@@ -5,7 +5,7 @@ import { useTheme } from '../contexts/ThemeContext'
 import { useSidebar } from '../contexts/SidebarContext'
 import {
   LayoutDashboard, MapPin, Trophy, Users,
-  UserCheck, BarChart2, Key, Settings, LogOut, Sun, Moon, X
+  UserCheck, BarChart2, Key, Settings, LogOut, Sun, Moon, X, History
 } from 'lucide-react'
 
 const NAV = [
@@ -29,7 +29,8 @@ const NAV = [
     items: [
       { to: '/relatorios', icon: BarChart2, label: 'Relatórios', minRole: 'professor' },
       { to: '/gerenciar-acesso', icon: Key, label: 'Acessos', minRole: 'admin' },
-      { to: '/configuracoes', icon: Settings, label: 'Configurações', minRole: 'admin' },
+      { to: '/historico', icon: History, label: 'Histórico', minRole: 'admin' },
+      { to: '/configuracoes', icon: Settings, label: 'Configurações', minRole: 'estagiario' },
     ]
   },
 ]

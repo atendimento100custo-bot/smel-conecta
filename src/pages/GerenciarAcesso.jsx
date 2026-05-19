@@ -59,13 +59,21 @@ export default function GerenciarAcesso() {
     cargo,
     label: CARGO_LABELS[cargo],
     membros: profiles
-      .filter(p => p.cargo === cargo && (p.nome || '').toLowerCase().includes(search.toLowerCase()))
+      .filter(p => {
+        if (p.cargo !== cargo) return false
+        if (!search.trim()) return true
+        const norm = (s) => (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+        return norm(search).split(/\s+/).filter(Boolean).every(w => norm(p.nome).includes(w))
+      })
       .sort((a, b) => (a.nome ?? '').localeCompare(b.nome ?? '', 'pt-BR')),
   })).filter(s => s.membros.length > 0)
 
-  const semCargo = profiles.filter(p =>
-    !CARGO_ORDER.includes(p.cargo) && (p.nome || '').toLowerCase().includes(search.toLowerCase())
-  ).sort((a, b) => (a.nome ?? '').localeCompare(b.nome ?? '', 'pt-BR'))
+  const semCargo = profiles.filter(p => {
+    if (CARGO_ORDER.includes(p.cargo)) return false
+    if (!search.trim()) return true
+    const norm = (s) => (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    return norm(search).split(/\s+/).filter(Boolean).every(w => norm(p.nome).includes(w))
+  }).sort((a, b) => (a.nome ?? '').localeCompare(b.nome ?? '', 'pt-BR'))
 
   function openEdit(p) {
     setEditing(p)

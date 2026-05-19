@@ -1,5 +1,6 @@
 // src/pages/Configuracoes.jsx
 import { useState } from 'react'
+import { Eye, EyeOff } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import Topbar from '../components/Topbar'
@@ -11,6 +12,8 @@ export default function Configuracoes() {
   const [confirmaSenha, setConfirmaSenha] = useState('')
   const [msg, setMsg] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [showNova, setShowNova] = useState(false)
+  const [showConfirma, setShowConfirma] = useState(false)
 
   async function handleSenha(e) {
     e.preventDefault()
@@ -57,26 +60,46 @@ export default function Configuracoes() {
           <form onSubmit={handleSenha} className="space-y-3">
             <div>
               <label className={labelCls}>Nova Senha</label>
-              <input
-                type="password"
-                value={novaSenha}
-                onChange={e => setNovaSenha(e.target.value)}
-                required
-                minLength={6}
-                className={inputCls}
-                placeholder="••••••••"
-              />
+              <div className="relative">
+                <input
+                  type={showNova ? 'text' : 'password'}
+                  value={novaSenha}
+                  onChange={e => setNovaSenha(e.target.value)}
+                  required
+                  minLength={6}
+                  className={`${inputCls} pr-10`}
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNova(v => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                  tabIndex={-1}
+                >
+                  {showNova ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </div>
             <div>
               <label className={labelCls}>Confirmar Senha</label>
-              <input
-                type="password"
-                value={confirmaSenha}
-                onChange={e => setConfirmaSenha(e.target.value)}
-                required
-                className={inputCls}
-                placeholder="••••••••"
-              />
+              <div className="relative">
+                <input
+                  type={showConfirma ? 'text' : 'password'}
+                  value={confirmaSenha}
+                  onChange={e => setConfirmaSenha(e.target.value)}
+                  required
+                  className={`${inputCls} pr-10`}
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirma(v => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                  tabIndex={-1}
+                >
+                  {showConfirma ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </div>
             {msg && (
               <p className={`text-xs px-3 py-2 rounded-lg ${msg.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>

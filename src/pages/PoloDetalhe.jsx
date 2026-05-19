@@ -1,4 +1,5 @@
 // src/pages/PoloDetalhe.jsx
+import { logAcao } from '../lib/auditLog'
 import { useMemo, useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useSupabaseData } from '../hooks/useSupabaseData'
@@ -16,9 +17,9 @@ import {
   Bus, Star, Save, ChevronRight, Trophy, Plus, UserPlus,
   Pencil, Trash2, Search, Filter, Upload, X
 } from 'lucide-react'
-import { NovoFuncionarioModal } from './Equipes'
+import { NovoFuncionarioModal, EditarFuncionarioModal, salvarVinculos } from './Equipes'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
-import { subDays, isSameDay, format } from 'date-fns'
+import { subDays, format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 
@@ -28,7 +29,8 @@ const CARGO_COLORS = { professor: 'amber', coordenador: 'blue', estagiario: 'pur
 const CARGO_LABELS = { professor: 'Professor', coordenador: 'Coordenador', estagiario: 'Estagiário', admin: 'Administrador' }
 const DIAS_OPTIONS = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
 const FAIXAS = ['Infantil', 'Adulto', 'Melhor Idade']
-const EMPTY_TURMA_FORM = { modalidade_id: '', professores_ids: [], dias: [], horario: '', faixa: 'Infantil', faixa_etaria: '', capacidade: 20, status: 'Ativa' }
+const EMPTY_TURMA_FORM = { modalidade_id: '', professores_ids: [], dias: [], horario: '', duracao_min: 60, faixa: 'Infantil', faixa_etaria: '', capacidade: 20, status: 'Ativa' }
+const DURACAO_OPTIONS = [30, 45, 60, 75, 90, 105, 120]
 
 function formatDate(dateStr) {
   if (!dateStr) return '—'
@@ -98,13 +100,21 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
   const notYetAvailable = nowMins < startMins - 10
   const isLocked = nowMins > endMins + 30
 
-  const alunosTurma = useMemo(
-    () => alunos
-      .filter(a => a.turma_id === turma?.id && a.status === 'Ativo')
-      .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
-      .filter(a => a.nome.toLowerCase().includes(buscaPresenca.toLowerCase())),
-    [alunos, turma, buscaPresenca]
-  )
+  const alunosTurma = useMemo(() => {
+    const norm = (s) => (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    return alunos
+      .filter(a => a.turma_id === turma?.id)
+      .filter(a => {
+        if (!buscaPresenca.trim()) return true
+        return norm(buscaPresenca).split(/\s+/).filter(Boolean).every(p => norm(a.nome).includes(p))
+      })
+      // Ativos primeiro, depois inativos/transferidos
+      .sort((a, b) => {
+        const aAtivo = a.status === 'Ativo' ? 0 : 1
+        const bAtivo = b.status === 'Ativo' ? 0 : 1
+        return aAtivo - bAtivo || (a.nome || '').localeCompare(b.nome || '', 'pt-BR')
+      })
+  }, [alunos, turma, buscaPresenca])
 
   useEffect(() => {
     if (!turma || !open) return
@@ -125,11 +135,27 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
   }, [turma, open])
 
   async function salvarPresenca() {
-    await supabase.from('presencas').delete().eq('turma_id', turma.id).eq('data', dataHoje)
-    const rows = Object.entries(presencaMap).map(([aluno_id, presente]) => ({
-      turma_id: turma.id, aluno_id, data: dataHoje, presente
-    }))
-    if (rows.length) await supabase.from('presencas').insert(rows)
+    // Re-fetch IDs existentes antes de salvar para evitar sobrescrita concorrente
+    const { data: existentes } = await supabase
+      .from('presencas')
+      .select('id,aluno_id')
+      .eq('turma_id', turma.id)
+      .eq('data', dataHoje)
+    const latestIds = {}
+    ;(existentes ?? []).forEach(r => { latestIds[r.aluno_id] = r.id })
+
+    const toUpdate = [], toInsert = []
+    Object.entries(presencaMap).forEach(([aluno_id, presente]) => {
+      if (latestIds[aluno_id]) {
+        toUpdate.push({ id: latestIds[aluno_id], presente })
+      } else {
+        toInsert.push({ turma_id: turma.id, aluno_id, data: dataHoje, presente })
+      }
+    })
+    await Promise.all([
+      ...toUpdate.map(r => supabase.from('presencas').update({ presente: r.presente }).eq('id', r.id)),
+      toInsert.length ? supabase.from('presencas').insert(toInsert) : Promise.resolve(),
+    ])
   }
 
   async function salvarRegistro() {
@@ -277,31 +303,52 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
           </div>
 
           {alunosTurma.length === 0 ? (
-            <div className="py-6 text-center text-sm text-slate-400">{buscaPresenca ? 'Nenhum aluno encontrado.' : 'Nenhum aluno ativo nesta turma.'}</div>
+            <div className="py-6 text-center text-sm text-slate-400">{buscaPresenca ? 'Nenhum aluno encontrado.' : 'Nenhum aluno nesta turma.'}</div>
           ) : (
             <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
-              {alunosTurma.map(a => (
-                <button
-                  key={a.id}
-                  onClick={() => setPresencaMap(m => ({ ...m, [a.id]: !m[a.id] }))}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
-                    presencaMap[a.id]
-                      ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-700'
-                      : 'bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800'
-                  }`}
-                >
-                  {presencaMap[a.id]
-                    ? <CheckCircle2 size={16} className="text-primary-600 flex-shrink-0" />
-                    : <Circle size={16} className="text-red-400 flex-shrink-0" />}
-                  <div className="w-6 h-6 rounded-full bg-primary-600 flex items-center justify-center flex-shrink-0">
-                    <span className="text-white text-[9px] font-bold">{a.nome?.charAt(0)}</span>
-                  </div>
-                  <span className="text-xs font-medium text-navy-900 dark:text-white text-left">{a.nome}</span>
-                  <span className={`ml-auto text-[10px] font-semibold ${presencaMap[a.id] ? 'text-primary-600' : 'text-red-400'}`}>
-                    {presencaMap[a.id] ? 'Presente' : 'Falta'}
-                  </span>
-                </button>
-              ))}
+              {alunosTurma.map(a => {
+                const ativo = a.status === 'Ativo'
+                if (!ativo) {
+                  return (
+                    <div key={a.id} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-50 dark:bg-navy-900/40 border border-slate-200 dark:border-navy-700 opacity-60">
+                      <Circle size={16} className="text-slate-300 flex-shrink-0" />
+                      <div className="w-6 h-6 rounded-full bg-slate-300 dark:bg-navy-600 flex items-center justify-center flex-shrink-0">
+                        <span className="text-white text-[9px] font-bold">{a.nome?.charAt(0)}</span>
+                      </div>
+                      <span className="text-xs font-medium text-slate-400 dark:text-slate-500 text-left flex-1 truncate">{a.nome}</span>
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border flex-shrink-0 ${
+                        a.status === 'Transferido'
+                          ? 'text-amber-700 bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-700 dark:text-amber-400'
+                          : 'text-slate-500 bg-slate-100 border-slate-200 dark:bg-navy-700 dark:border-navy-600 dark:text-slate-400'
+                      }`}>
+                        {a.status}
+                      </span>
+                    </div>
+                  )
+                }
+                return (
+                  <button
+                    key={a.id}
+                    onClick={() => setPresencaMap(m => ({ ...m, [a.id]: !m[a.id] }))}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                      presencaMap[a.id]
+                        ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-700'
+                        : 'bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800'
+                    }`}
+                  >
+                    {presencaMap[a.id]
+                      ? <CheckCircle2 size={16} className="text-primary-600 flex-shrink-0" />
+                      : <Circle size={16} className="text-red-400 flex-shrink-0" />}
+                    <div className="w-6 h-6 rounded-full bg-primary-600 flex items-center justify-center flex-shrink-0">
+                      <span className="text-white text-[9px] font-bold">{a.nome?.charAt(0)}</span>
+                    </div>
+                    <span className="text-xs font-medium text-navy-900 dark:text-white text-left">{a.nome}</span>
+                    <span className={`ml-auto text-[10px] font-semibold ${presencaMap[a.id] ? 'text-primary-600' : 'text-red-400'}`}>
+                      {presencaMap[a.id] ? 'Presente' : 'Falta'}
+                    </span>
+                  </button>
+                )
+              })}
             </div>
           )}
         </div>
@@ -343,8 +390,8 @@ export default function PoloDetalhe() {
   const { data: atestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id')
   const { data: viagens, reload: reloadViagens } = useSupabaseData('viagens', '*, turmas(*, modalidades(nome,emoji))')
   const { data: modalidades } = useSupabaseData('modalidades', 'id,nome,emoji')
-  const { data: professores } = useSupabaseData('profiles', 'id,nome,cargo')
-  const { data: atribuicoes, loading: loadingAtribuicoes } = useSupabaseData('atribuicoes', 'usuario_id,polo_id,cargo')
+  const { data: professores } = useSupabaseData('profiles', 'id,nome,cargo,telefone,email')
+  const { data: atribuicoes, loading: loadingAtribuicoes, reload: reloadAtribuicoes } = useSupabaseData('atribuicoes', 'id,usuario_id,polo_id,turma_id,cargo')
   const { data: registros, reload: reloadRegistros } = useSupabaseData('registros_aula', 'id,turma_id,data,conteudo,ocorrencias,alunos_presentes')
 
   // Nova / editar turma form
@@ -375,6 +422,60 @@ export default function PoloDetalhe() {
     })
   }
 
+  // Editar funcionário direto do polo
+  const EMPTY_FUNC_FORM = { nome: '', cargo: 'professor', telefone: '', email: '', vinculos: [] }
+  const [editFuncOpen, setEditFuncOpen] = useState(false)
+  const [editFuncMembro, setEditFuncMembro] = useState(null)
+  const [editFuncForm, setEditFuncForm] = useState(EMPTY_FUNC_FORM)
+  const [editFuncSaving, setEditFuncSaving] = useState(false)
+
+  function openEditFunc(m) {
+    const poloMap = {}
+    for (const a of atribuicoes.filter(a => a.usuario_id === m.id)) {
+      if (!a.polo_id) continue
+      if (!poloMap[a.polo_id]) poloMap[a.polo_id] = { polo_id: a.polo_id, turma_ids: [] }
+      if (a.turma_id) poloMap[a.polo_id].turma_ids.push(a.turma_id)
+    }
+    setEditFuncForm({
+      nome: m.nome ?? '',
+      cargo: m.cargo ?? 'professor',
+      telefone: m.telefone ?? '',
+      email: m.email ?? '',
+      vinculos: Object.values(poloMap),
+    })
+    setEditFuncMembro(m)
+    setEditFuncOpen(true)
+  }
+
+  async function handleSaveFunc() {
+    if (!editFuncMembro) return
+    setEditFuncSaving(true)
+    await supabase.from('profiles').update({
+      nome: editFuncForm.nome,
+      cargo: editFuncForm.cargo,
+      telefone: editFuncForm.telefone || null,
+      email: editFuncForm.email || null,
+    }).eq('id', editFuncMembro.id)
+    if (editFuncForm.email && supabaseAdmin) {
+      await supabaseAdmin.auth.admin.updateUserById(editFuncMembro.id, { email: editFuncForm.email })
+    }
+    await supabase.from('turmas').update({ professor_id: null }).eq('professor_id', editFuncMembro.id)
+    await supabase.from('atribuicoes').delete().eq('usuario_id', editFuncMembro.id)
+    await salvarVinculos(editFuncMembro.id, editFuncForm.cargo, editFuncForm.vinculos ?? [])
+    setEditFuncSaving(false)
+    setEditFuncOpen(false)
+    reloadTurmas()
+    reloadAtribuicoes()
+  }
+
+  function getAllowedCargos() {
+    const cargo = profile?.cargo
+    if (cargo === 'admin') return ['admin', 'coordenador', 'professor', 'estagiario']
+    if (cargo === 'coordenador') return ['coordenador', 'professor', 'estagiario']
+    if (cargo === 'professor') return ['professor', 'estagiario']
+    return ['professor']
+  }
+
   // Viagem form
   const [viagemModalOpen, setViagemModalOpen] = useState(false)
   const [viagemTurma, setViagemTurma] = useState(null)
@@ -387,12 +488,38 @@ export default function PoloDetalhe() {
   const EMPTY_ALUNO = { nome: '', data_nasc: '', cpf: '', telefone: '', telefone_emergencia: '', email: '', status: 'Ativo', turma_id: '', genero: '', foto_url: '', atestado_validade: '', atestado_foto: '' }
   const [novoAlunoOpen, setNovoAlunoOpen] = useState(false)
   const [novoAlunoForm, setNovoAlunoForm] = useState(EMPTY_ALUNO)
+  const [novoAlunoErrors, setNovoAlunoErrors] = useState({})
+  const [dupWarning, setDupWarning] = useState(null) // { aluno, turma }
+  const [filtroModalidadeAluno, setFiltroModalidadeAluno] = useState('')
   const [savingAluno, setSavingAluno] = useState(false)
+  const [novoAlunoError, setNovoAlunoError] = useState('')
+
+  // ── Helpers de validação de aluno ──────────────────────────────
+  function normNomeAluno(s) {
+    return (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()
+  }
+  function validateAlunoForm(form) {
+    const e = {}
+    const nome = (form.nome ?? '').trim()
+    if (!nome) e.nome = 'Nome é obrigatório'
+    else if (nome.includes('@')) e.nome = 'Parece que há um e-mail no campo Nome — verifique'
+    if (!form.turma_id) e.turma_id = 'Selecione uma turma'
+    if (form.email?.trim() && !/\S+@\S+\.\S+/.test(form.email.trim()))
+      e.email = 'E-mail inválido — pode ser um nome inserido por engano'
+    if (form.data_nasc) {
+      const nasc = new Date(form.data_nasc + 'T12:00:00')
+      const hoje = new Date()
+      if (nasc > hoje) e.data_nasc = 'Data de nascimento não pode ser no futuro'
+      else if (hoje.getFullYear() - nasc.getFullYear() > 120)
+        e.data_nasc = `Verifique o ano ${nasc.getFullYear()} — parece um erro de digitação`
+    }
+    return e
+  }
   const [uploadingFotoAluno, setUploadingFotoAluno] = useState(false)
   const [uploadingAtestadoFoto, setUploadingAtestadoFoto] = useState(false)
 
   // Novo funcionário direto do polo
-  const EMPTY_FUNC = { nome: '', email: '', senha: '', cargo: 'professor', telefone: '', vinculos: [{ polo_id: id, cargo: 'professor', turma_id: '' }] }
+  const EMPTY_FUNC = { nome: '', email: '', senha: '', cargo: 'professor', telefone: '', vinculos: [{ polo_id: id, turma_ids: [] }] }
   const [novoFuncOpen, setNovoFuncOpen] = useState(false)
   const [novoFuncForm, setNovoFuncForm] = useState(EMPTY_FUNC)
   const [criandoFunc, setCriandoFunc] = useState(false)
@@ -400,7 +527,7 @@ export default function PoloDetalhe() {
   const [funcSuccess, setFuncSuccess] = useState(false)
 
   function openNovoFunc() {
-    setNovoFuncForm({ ...EMPTY_FUNC, vinculos: [{ polo_id: id, cargo: 'professor', turma_id: '' }] })
+    setNovoFuncForm({ ...EMPTY_FUNC, vinculos: [{ polo_id: id, turma_ids: [] }] })
     setFuncError('')
     setFuncSuccess(false)
     setNovoFuncOpen(true)
@@ -442,18 +569,7 @@ export default function PoloDetalhe() {
       ativo: true,
     }, { onConflict: 'id' })
 
-    for (const v of (novoFuncForm.vinculos ?? [])) {
-      if (!v.polo_id) continue
-      await supabase.from('atribuicoes').insert({
-        usuario_id: userId,
-        polo_id: v.polo_id,
-        turma_id: (v.cargo !== 'coordenador' && v.turma_id) ? v.turma_id : null,
-        cargo: v.cargo ?? 'professor',
-      })
-      if (v.cargo === 'professor' && v.turma_id) {
-        await supabase.from('turmas').update({ professor_id: userId }).eq('id', v.turma_id)
-      }
-    }
+    await salvarVinculos(userId, novoFuncForm.cargo, novoFuncForm.vinculos ?? [])
 
     setCriandoFunc(false)
     setFuncSuccess(true)
@@ -495,38 +611,8 @@ export default function PoloDetalhe() {
     }
   }, [temAcesso, polos, profile, loadingAtribuicoes, loadingTurmas])
 
-  // Auto-desativar alunos Melhor Idade com atestado vencido há 6+ meses
-  useEffect(() => {
-    async function desativarAlunosMelhorIdade() {
-      const hoje = new Date()
-      const ha6meses = new Date()
-      ha6meses.setMonth(hoje.getMonth() - 6)
-
-      // Alunos Melhor Idade (60+) das turmas do polo
-      const turmaIds = new Set(turmasPolo.map(t => t.id))
-      const alunosMelhorIdade = alunos.filter(a => {
-        if (!turmaIds.has(a.turma_id) || a.status !== 'Ativo') return false
-        if (!a.data_nasc) return false
-        return new Date().getFullYear() - new Date(a.data_nasc).getFullYear() >= 60
-      })
-
-      // Verificar atestados vencidos há 6+ meses
-      for (const aluno of alunosMelhorIdade) {
-        const atestadoAluno = atestados.find(a => a.aluno_id === aluno.id)
-        if (atestadoAluno) {
-          const dataValidade = new Date(atestadoAluno.data_validade)
-          if (dataValidade < ha6meses) {
-            // Atestado venceu há mais de 6 meses, desativar aluno
-            await supabase.from('alunos').update({ status: 'Inativo' }).eq('id', aluno.id)
-          }
-        }
-      }
-    }
-
-    if (turmasPolo.length > 0 && alunos.length > 0) {
-      desativarAlunosMelhorIdade()
-    }
-  }, [turmasPolo, alunos, atestados])
+  // Auto-inativação por atestado desativada durante período de cadastro inicial.
+  // Os alertas visuais de atestado vencido/vencendo continuam ativos no card de KPIs.
 
   const turmaIds = useMemo(() => new Set(turmasPolo.map(t => t.id)), [turmasPolo])
   const alunosPolo = useMemo(() => alunos.filter(a => turmaIds.has(a.turma_id)), [alunos, turmaIds])
@@ -582,7 +668,8 @@ export default function PoloDetalhe() {
   // Gráfico
   const ultimos7 = Array.from({ length: 7 }, (_, i) => {
     const d = subDays(new Date(), 6 - i)
-    const dp = presencasPolo.filter(p => isSameDay(new Date(p.data), d))
+    const dStr = format(d, 'yyyy-MM-dd')
+    const dp = presencasPolo.filter(p => (p.data ?? '').slice(0, 10) === dStr)
     return { dia: format(d, 'EEE', { locale: ptBR }), Presentes: dp.filter(p => p.presente).length, Faltas: dp.filter(p => !p.presente).length }
   })
 
@@ -598,12 +685,22 @@ export default function PoloDetalhe() {
     return Object.values(map)
   }, [turmasPolo])
 
-  // Equipe
+  // Equipe — une professores (via professor_id nas turmas) + staff via atribuicoes
   const equipe = useMemo(() => {
     const seen = new Set(); const lista = []
+    // Professores que são professor_id de alguma turma do polo
     turmasPolo.forEach(t => { if (t.profiles && !seen.has(t.profiles.id)) { seen.add(t.profiles.id); lista.push(t.profiles) } })
-    return lista
-  }, [turmasPolo])
+    // Demais funcionários vinculados via atribuicoes (estagiários, coordenadores, etc.)
+    atribuicoes
+      .filter(a => a.polo_id === id)
+      .forEach(a => {
+        if (!seen.has(a.usuario_id)) {
+          const prof = professores.find(p => p.id === a.usuario_id)
+          if (prof) { seen.add(prof.id); lista.push(prof) }
+        }
+      })
+    return lista.sort((a, b) => (a.nome ?? '').localeCompare(b.nome ?? '', 'pt-BR'))
+  }, [turmasPolo, atribuicoes, professores, id])
 
   // Operacional — aulas de hoje
   const diaHoje = hoje.getDay()
@@ -629,6 +726,7 @@ export default function PoloDetalhe() {
       professor_id: turmaForm.professores_ids[0] || null,
       dias: turmaForm.dias,
       horario: turmaForm.horario,
+      duracao_min: Number(turmaForm.duracao_min) || 60,
       faixa: turmaForm.faixa,
       faixa_etaria: turmaForm.faixa_etaria || null,
       capacidade: Number(turmaForm.capacidade),
@@ -661,6 +759,7 @@ export default function PoloDetalhe() {
       professores_ids: [],
       dias: t.dias ?? [],
       horario: t.horario ?? '',
+      duracao_min: t.duracao_min ?? 60,
       faixa: t.faixa ?? 'Infantil',
       faixa_etaria: t.faixa_etaria ?? '',
       capacidade: t.capacidade ?? 20,
@@ -677,6 +776,7 @@ export default function PoloDetalhe() {
       professor_id: turmaForm.professores_ids[0] || null,
       dias: turmaForm.dias,
       horario: turmaForm.horario,
+      duracao_min: Number(turmaForm.duracao_min) || 60,
       faixa: turmaForm.faixa,
       faixa_etaria: turmaForm.faixa_etaria || null,
       capacidade: Number(turmaForm.capacidade),
@@ -769,8 +869,21 @@ export default function PoloDetalhe() {
     setUploadingAtestadoFoto(false)
   }
 
-  async function salvarNovoAluno() {
-    if (!novoAlunoForm.nome.trim()) return
+  async function salvarNovoAluno(forcarSalvar = false) {
+    const erros = validateAlunoForm(novoAlunoForm)
+    setNovoAlunoErrors(erros)
+    if (Object.keys(erros).length > 0) return
+    if (!forcarSalvar) {
+      const normNome = normNomeAluno(novoAlunoForm.nome)
+      const dup = alunosPolo.find(a => normNomeAluno(a.nome) === normNome)
+      if (dup) {
+        const turmaDup = turmasPolo.find(t => t.id === dup.turma_id)
+        setDupWarning({ aluno: dup, turma: turmaDup })
+        return
+      }
+    }
+    setDupWarning(null)
+    setNovoAlunoError('')
     setSavingAluno(true)
     const turmaMelhorIdade = turmasPolo.find(t => t.id === novoAlunoForm.turma_id)?.faixa === 'Melhor Idade'
     const payload = {
@@ -786,8 +899,22 @@ export default function PoloDetalhe() {
       foto_url: novoAlunoForm.foto_url || null,
     }
     try {
-      const { data } = await supabase.from('alunos').insert(payload).select('id').single()
+      const { data, error: insertError } = await supabase.from('alunos').insert(payload).select('id').single()
+      if (insertError || !data?.id) {
+        setSavingAluno(false)
+        setNovoAlunoError('Não foi possível salvar o aluno. Verifique se você tem permissão para esta turma ou tente novamente.')
+        return
+      }
       if (data?.id) {
+        // Log de auditoria
+        const turmaAluno = turmasPolo.find(t => t.id === novoAlunoForm.turma_id)
+        logAcao({
+          acao: 'cadastro_aluno',
+          perfil: profile,
+          polo,
+          turma: turmaAluno,
+          aluno: { id: data.id, nome: novoAlunoForm.nome.trim() },
+        })
         if (novoAlunoForm.turma_id) {
           await supabase.from('aluno_turmas').insert({ aluno_id: data.id, turma_id: novoAlunoForm.turma_id })
         }
@@ -798,10 +925,10 @@ export default function PoloDetalhe() {
             arquivo_url: novoAlunoForm.atestado_foto || null,
           })
         }
+        setSavingAluno(false)
+        setNovoAlunoOpen(false)
+        setNovoAlunoForm(EMPTY_ALUNO)
       }
-      setSavingAluno(false)
-      setNovoAlunoOpen(false)
-      setNovoAlunoForm(EMPTY_ALUNO)
     } catch (erro) {
       if (offline || !navigator.onLine) {
         addToQueue({ type: 'aluno', data: payload, turma_id: novoAlunoForm.turma_id, turmaMelhorIdade, atestado_validade: novoAlunoForm.atestado_validade, atestado_foto: novoAlunoForm.atestado_foto })
@@ -811,6 +938,7 @@ export default function PoloDetalhe() {
       } else {
         console.error('Erro ao salvar aluno:', erro)
         setSavingAluno(false)
+        setNovoAlunoError('Erro inesperado ao salvar. Tente novamente.')
       }
     }
   }
@@ -867,7 +995,7 @@ export default function PoloDetalhe() {
                 <Button size="sm" variant="secondary" onClick={openNovoFunc}>
                   <UserPlus size={13}/> <span className="hidden sm:inline">Novo Funcionário</span>
                 </Button>
-                <Button size="sm" onClick={() => { setNovoAlunoForm(EMPTY_ALUNO); setNovoAlunoOpen(true) }}>
+                <Button size="sm" onClick={() => { setNovoAlunoForm(EMPTY_ALUNO); setFiltroModalidadeAluno(''); setNovoAlunoOpen(true) }}>
                   <Plus size={13}/> <span className="hidden sm:inline">Novo Aluno</span>
                 </Button>
               </div>
@@ -909,52 +1037,74 @@ export default function PoloDetalhe() {
               </button>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
               {/* Presença 7 dias */}
-              <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
+              <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col">
                 <p className="text-xs font-bold text-navy-900 dark:text-white mb-3">Presença — últimos 7 dias</p>
                 {presencasPolo.length === 0 ? (
-                  <div className="h-[140px] flex flex-col items-center justify-center gap-2">
+                  <div className="flex-1 min-h-[160px] flex flex-col items-center justify-center gap-2">
                     <div className="text-2xl">📊</div>
                     <p className="text-xs text-slate-400 dark:text-slate-500 text-center">Nenhuma presença registrada neste polo.</p>
                   </div>
                 ) : (
-                  <ResponsiveContainer width="100%" height={140}>
-                    <BarChart data={ultimos7} barSize={14} barGap={3}>
-                      <CartesianGrid vertical={false} stroke={gridColor} strokeDasharray="3 3" />
-                      <XAxis dataKey="dia" tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
-                      <YAxis hide />
-                      <Tooltip content={<ChartTooltip />} cursor={{ fill: dark ? '#1e2d42' : '#f8fafc' }} />
-                      <Bar dataKey="Presentes" fill="#009640" radius={[3, 3, 0, 0]} />
-                      <Bar dataKey="Faltas" fill="#f87171" radius={[3, 3, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  <>
+                    <div className="flex-1 min-h-[160px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={ultimos7} barSize={14} barGap={3} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                          <CartesianGrid vertical={false} stroke={gridColor} strokeDasharray="3 3" />
+                          <XAxis dataKey="dia" tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
+                          <YAxis hide />
+                          <Tooltip content={<ChartTooltip />} cursor={{ fill: dark ? '#1e2d42' : '#f8fafc' }} />
+                          <Bar dataKey="Presentes" fill="#009640" radius={[3, 3, 0, 0]} />
+                          <Bar dataKey="Faltas" fill="#f87171" radius={[3, 3, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="flex items-center gap-3 mt-2 pt-2 border-t border-slate-100 dark:border-navy-700">
+                      <span className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400"><span className="w-2.5 h-2.5 rounded-sm bg-primary-600 inline-block" /> Presentes</span>
+                      <span className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400"><span className="w-2.5 h-2.5 rounded-sm bg-red-400 inline-block" /> Faltas</span>
+                    </div>
+                  </>
                 )}
-                <div className="flex items-center gap-3 mt-2">
-                  <span className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400"><span className="w-2.5 h-2.5 rounded-sm bg-primary-600 inline-block" /> Presentes</span>
-                  <span className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400"><span className="w-2.5 h-2.5 rounded-sm bg-red-400 inline-block" /> Faltas</span>
-                </div>
               </div>
 
               {/* Equipe */}
-              <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
+              <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col">
                 <p className="text-xs font-bold text-navy-900 dark:text-white mb-3">Equipe no Polo</p>
                 {equipe.length === 0 ? (
-                  <div className="h-[140px] flex flex-col items-center justify-center gap-2">
+                  <div className="flex-1 min-h-[160px] flex flex-col items-center justify-center gap-2">
                     <div className="text-2xl">👥</div>
-                    <p className="text-xs text-slate-400 dark:text-slate-500 text-center">Nenhum professor vinculado às turmas deste polo.</p>
+                    <p className="text-xs text-slate-400 dark:text-slate-500 text-center">Nenhum funcionário vinculado a este polo.</p>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    {equipe.map(m => (
-                      <div key={m.id} className="flex items-center gap-2.5">
-                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-primary-600 to-primary-400 flex items-center justify-center flex-shrink-0">
-                          <span className="text-white text-[9px] font-bold">{m.nome?.charAt(0)?.toUpperCase()}</span>
+                  <div className="flex-1 overflow-y-auto overscroll-contain max-h-[300px] space-y-1">
+                    {equipe.map(m => {
+                      const canEditEquipe = isAdmin || atribuicoes.some(
+                        a => a.usuario_id === profile?.id && a.polo_id === id && a.cargo === 'coordenador'
+                      )
+                      return canEditEquipe ? (
+                        <button
+                          key={m.id}
+                          onClick={() => openEditFunc(m)}
+                          className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-navy-700 transition-colors group text-left"
+                        >
+                          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-primary-600 to-primary-400 flex items-center justify-center flex-shrink-0">
+                            <span className="text-white text-[9px] font-bold">{m.nome?.charAt(0)?.toUpperCase()}</span>
+                          </div>
+                          <p className="text-xs font-semibold text-navy-900 dark:text-white flex-1 truncate">{m.nome}</p>
+                          <Badge color={CARGO_COLORS[m.cargo] ?? 'gray'}>{CARGO_LABELS[m.cargo] ?? m.cargo}</Badge>
+                          <Pencil size={11} className="text-slate-300 group-hover:text-slate-500 dark:group-hover:text-slate-300 flex-shrink-0 transition-colors" />
+                        </button>
+                      ) : (
+                        <div key={m.id} className="flex items-center gap-2.5 px-2 py-2">
+                          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-primary-600 to-primary-400 flex items-center justify-center flex-shrink-0">
+                            <span className="text-white text-[9px] font-bold">{m.nome?.charAt(0)?.toUpperCase()}</span>
+                          </div>
+                          <p className="text-xs font-semibold text-navy-900 dark:text-white flex-1 truncate">{m.nome}</p>
+                          <Badge color={CARGO_COLORS[m.cargo] ?? 'gray'}>{CARGO_LABELS[m.cargo] ?? m.cargo}</Badge>
                         </div>
-                        <p className="text-xs font-semibold text-navy-900 dark:text-white flex-1 truncate">{m.nome}</p>
-                        <Badge color={CARGO_COLORS[m.cargo] ?? 'gray'}>{CARGO_LABELS[m.cargo] ?? m.cargo}</Badge>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
               </div>
@@ -1157,7 +1307,7 @@ export default function PoloDetalhe() {
                                         {t.status === 'Inativa' && <span className="text-[8px] bg-slate-100 dark:bg-navy-600 text-slate-500 px-1.5 py-0.5 rounded-full font-semibold">Inativa</span>}
                                       </div>
                                       <div className="flex items-center gap-3 mt-0.5">
-                                        <span className="flex items-center gap-1 text-[9px] text-slate-500 dark:text-slate-400"><Clock size={8}/>{t.dias?.join(', ')} · {t.horario?.slice(0,5)}</span>
+                                        <span className="flex items-center gap-1 text-[9px] text-slate-500 dark:text-slate-400"><Clock size={8}/>{t.dias?.join(', ')} · {t.horario?.slice(0,5)}{t.duracao_min && t.duracao_min !== 60 ? ` · ${t.duracao_min < 60 ? `${t.duracao_min}min` : `${Math.floor(t.duracao_min/60)}h${t.duracao_min%60 ? `${t.duracao_min%60}min` : ''}`}` : ''}</span>
                                         <span className="flex items-center gap-1 text-[9px] text-slate-500 dark:text-slate-400"><Users size={8}/>{cnt}/{t.capacidade}</span>
                                         <div className="w-14 h-1 bg-slate-200 dark:bg-navy-600 rounded-full overflow-hidden">
                                           <div className="h-full bg-primary-500 rounded-full" style={{ width: `${ocup}%` }}/>
@@ -1211,7 +1361,7 @@ export default function PoloDetalhe() {
                     <span className="text-[10px] text-slate-400">{todosRegs.length} registro{todosRegs.length !== 1 ? 's' : ''}</span>
                   </div>
                   {/* Filtros */}
-                  <div className="grid grid-cols-3 gap-2 mb-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
                     <select value={regFiltroTurma} onChange={e => setRegFiltroTurma(e.target.value)}
                       className="px-2 py-1.5 rounded-lg border border-slate-200 dark:border-navy-600 text-[11px] bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-primary-500">
                       <option value="">Todas as turmas</option>
@@ -1497,12 +1647,19 @@ export default function PoloDetalhe() {
             </div>
           </div>
 
-          {/* Horário + Faixa */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Horário + Duração + Categoria */}
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Horário *</label>
               <input type="time" value={turmaForm.horario} onChange={e => setTurmaForm(f => ({ ...f, horario: e.target.value }))}
                 className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Duração</label>
+              <select value={turmaForm.duracao_min} onChange={e => setTurmaForm(f => ({ ...f, duracao_min: Number(e.target.value) }))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+                {DURACAO_OPTIONS.map(d => <option key={d} value={d}>{d < 60 ? `${d} min` : d === 60 ? '1h' : `${Math.floor(d/60)}h${d%60 ? `${d%60}min` : ''}`}</option>)}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Categoria</label>
@@ -1626,7 +1783,7 @@ export default function PoloDetalhe() {
       </Modal>
 
       {/* Modal Novo Aluno (direto do polo) */}
-      <Modal open={novoAlunoOpen} onClose={() => setNovoAlunoOpen(false)} title="Novo Aluno" size="lg">
+      <Modal open={novoAlunoOpen} onClose={() => { setNovoAlunoOpen(false); setFiltroModalidadeAluno(''); setNovoAlunoErrors({}); setDupWarning(null) }} title="Novo Aluno" size="lg">
         <div className="space-y-3">
 
           {/* Foto do aluno */}
@@ -1664,45 +1821,48 @@ export default function PoloDetalhe() {
 
           <div>
             <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Nome <span className="text-red-400">*</span></label>
-            <input type="text" value={novoAlunoForm.nome}
-              onChange={e => setNovoAlunoForm(f => ({ ...f, nome: e.target.value }))}
+            <input type="text" autoComplete="new-password" readOnly onFocus={e => e.currentTarget.removeAttribute('readonly')} value={novoAlunoForm.nome}
+              onChange={e => { setNovoAlunoForm(f => ({ ...f, nome: e.target.value })); setNovoAlunoErrors(e2 => ({ ...e2, nome: undefined })) }}
               placeholder="Nome completo"
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500" />
+              className={`w-full px-3 py-2 rounded-lg border text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 ${novoAlunoErrors.nome ? 'border-red-400 dark:border-red-500 ring-1 ring-red-400' : 'border-slate-200 dark:border-navy-600'}`} />
+            {novoAlunoErrors.nome && <p className="text-[11px] text-red-500 mt-1 flex items-center gap-1">⚠ {novoAlunoErrors.nome}</p>}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Data de Nascimento</label>
-              <input type="date" value={novoAlunoForm.data_nasc}
-                onChange={e => setNovoAlunoForm(f => ({ ...f, data_nasc: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500" />
+              <input type="date" autoComplete="new-password" value={novoAlunoForm.data_nasc}
+                onChange={e => { setNovoAlunoForm(f => ({ ...f, data_nasc: e.target.value })); setNovoAlunoErrors(e2 => ({ ...e2, data_nasc: undefined })) }}
+                className={`w-full px-3 py-2 rounded-lg border text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 ${novoAlunoErrors.data_nasc ? 'border-red-400 dark:border-red-500 ring-1 ring-red-400' : 'border-slate-200 dark:border-navy-600'}`} />
+              {novoAlunoErrors.data_nasc && <p className="text-[11px] text-red-500 mt-1">⚠ {novoAlunoErrors.data_nasc}</p>}
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">CPF</label>
-              <input type="text" value={novoAlunoForm.cpf}
+              <input type="text" autoComplete="new-password" readOnly onFocus={e => e.currentTarget.removeAttribute('readonly')} value={novoAlunoForm.cpf}
                 onChange={e => setNovoAlunoForm(f => ({ ...f, cpf: e.target.value }))}
                 placeholder="000.000.000-00"
                 className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Telefone</label>
-              <input type="text" value={novoAlunoForm.telefone}
+              <input type="text" autoComplete="new-password" readOnly onFocus={e => e.currentTarget.removeAttribute('readonly')} value={novoAlunoForm.telefone}
                 onChange={e => setNovoAlunoForm(f => ({ ...f, telefone: e.target.value }))}
                 placeholder="(00) 00000-0000"
                 className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Tel. Emergência</label>
-              <input type="text" value={novoAlunoForm.telefone_emergencia}
+              <input type="text" autoComplete="new-password" readOnly onFocus={e => e.currentTarget.removeAttribute('readonly')} value={novoAlunoForm.telefone_emergencia}
                 onChange={e => setNovoAlunoForm(f => ({ ...f, telefone_emergencia: e.target.value }))}
                 placeholder="(00) 00000-0000"
                 className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500" />
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">E-mail</label>
-              <input type="email" value={novoAlunoForm.email}
-                onChange={e => setNovoAlunoForm(f => ({ ...f, email: e.target.value }))}
+              <input type="text" autoComplete="new-password" readOnly onFocus={e => e.currentTarget.removeAttribute('readonly')} value={novoAlunoForm.email}
+                onChange={e => { setNovoAlunoForm(f => ({ ...f, email: e.target.value })); setNovoAlunoErrors(e2 => ({ ...e2, email: undefined })) }}
                 placeholder="aluno@email.com"
-                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                className={`w-full px-3 py-2 rounded-lg border text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 ${novoAlunoErrors.email ? 'border-red-400 dark:border-red-500 ring-1 ring-red-400' : 'border-slate-200 dark:border-navy-600'}`} />
+              {novoAlunoErrors.email && <p className="text-[11px] text-red-500 mt-1">⚠ {novoAlunoErrors.email}</p>}
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Status</label>
@@ -1726,19 +1886,43 @@ export default function PoloDetalhe() {
               </select>
             </div>
           </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Turma (neste polo)</label>
-            <select value={novoAlunoForm.turma_id}
-              onChange={e => setNovoAlunoForm(f => ({ ...f, turma_id: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500">
-              <option value="">Sem turma</option>
-              {turmasPolo.map(t => (
-                <option key={t.id} value={t.id}>
-                  {[t.modalidades?.nome, t.faixa, t.dias?.join(','), t.horario?.slice(0,5)].filter(Boolean).join(' · ')}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Turma — seleção hierárquica: modalidade → turma */}
+          {(() => {
+            const modalidadesPolo = [...new Map(turmasPolo.map(t => [t.modalidade_id, t.modalidades?.nome]).filter(([id]) => id)).values()]
+            const temMultiplasModalidades = modalidadesPolo.length > 1
+            const turmasFiltradas = filtroModalidadeAluno
+              ? turmasPolo.filter(t => t.modalidades?.nome === filtroModalidadeAluno)
+              : turmasPolo
+            return (
+              <div className="space-y-2">
+                {temMultiplasModalidades && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Modalidade</label>
+                    <select value={filtroModalidadeAluno}
+                      onChange={e => { setFiltroModalidadeAluno(e.target.value); setNovoAlunoForm(f => ({ ...f, turma_id: '' })) }}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+                      <option value="">Todas as modalidades</option>
+                      {modalidadesPolo.map(nome => <option key={nome} value={nome}>{nome}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Turma (neste polo) <span className="text-red-400">*</span></label>
+                  <select value={novoAlunoForm.turma_id}
+                    onChange={e => { setNovoAlunoForm(f => ({ ...f, turma_id: e.target.value })); setNovoAlunoErrors(e2 => ({ ...e2, turma_id: undefined })) }}
+                    className={`w-full px-3 py-2 rounded-lg border text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 ${novoAlunoErrors.turma_id ? 'border-red-400 dark:border-red-500 ring-1 ring-red-400' : 'border-slate-200 dark:border-navy-600'}`}>
+                    <option value="">— Selecione uma turma —</option>
+                    {turmasFiltradas.map(t => (
+                      <option key={t.id} value={t.id}>
+                        {[!temMultiplasModalidades || filtroModalidadeAluno ? null : t.modalidades?.nome, t.faixa, t.dias?.join(','), t.horario?.slice(0,5)].filter(Boolean).join(' · ')}
+                      </option>
+                    ))}
+                  </select>
+                  {novoAlunoErrors.turma_id && <p className="text-[11px] text-red-500 mt-1">⚠ {novoAlunoErrors.turma_id}</p>}
+                </div>
+              </div>
+            )
+          })()}
           {/* Atestado médico — somente para turmas Melhor Idade */}
           {turmasPolo.find(t => t.id === novoAlunoForm.turma_id)?.faixa === 'Melhor Idade' && (
             <div className="rounded-xl border border-amber-200 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-900/10 p-3 space-y-3">
@@ -1775,9 +1959,15 @@ export default function PoloDetalhe() {
             </div>
           )}
 
+          {novoAlunoError && (
+            <div className="px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-[12px] text-red-600 dark:text-red-400 flex items-center gap-2">
+              ⚠ {novoAlunoError}
+            </div>
+          )}
+
           <div className="flex gap-2 justify-end pt-2">
-            <Button variant="secondary" size="sm" onClick={() => setNovoAlunoOpen(false)}>Cancelar</Button>
-            <Button size="sm" onClick={salvarNovoAluno} disabled={savingAluno || !novoAlunoForm.nome.trim()}>
+            <Button variant="secondary" size="sm" onClick={() => { setNovoAlunoOpen(false); setFiltroModalidadeAluno(''); setNovoAlunoErrors({}); setDupWarning(null); setNovoAlunoError('') }}>Cancelar</Button>
+            <Button size="sm" onClick={() => salvarNovoAluno()} disabled={savingAluno}>
               {savingAluno ? 'Salvando...' : 'Salvar'}
             </Button>
           </div>
@@ -1818,6 +2008,19 @@ export default function PoloDetalhe() {
         </div>
       </Modal>
 
+      {/* Modal: Editar Funcionário (clicou no card Equipe do polo) */}
+      <EditarFuncionarioModal
+        open={editFuncOpen}
+        onClose={() => setEditFuncOpen(false)}
+        form={editFuncForm}
+        setForm={setEditFuncForm}
+        onSave={handleSaveFunc}
+        saving={editFuncSaving}
+        cargos={getAllowedCargos()}
+        polos={polos}
+        turmas={turmas}
+      />
+
       {/* Modal: Novo Funcionário (polo pré-preenchido) */}
       <NovoFuncionarioModal
         open={novoFuncOpen}
@@ -1855,6 +2058,14 @@ export default function PoloDetalhe() {
         onConfirm={handleDeleteTurma}
         onCancel={() => setDeleteTurmaTarget(null)}
         danger
+      />
+
+      <ConfirmDialog
+        open={!!dupWarning}
+        title="Aluno possivelmente duplicado"
+        description={`Já existe "${dupWarning?.aluno?.nome}" neste polo${dupWarning?.turma ? ` (${dupWarning.turma.modalidades?.nome ?? 'turma'})` : ''}. Deseja cadastrar mesmo assim?`}
+        onConfirm={() => { setDupWarning(null); salvarNovoAluno(true) }}
+        onClose={() => setDupWarning(null)}
       />
     </div>
   )

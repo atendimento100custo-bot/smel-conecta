@@ -11,7 +11,7 @@ import Badge from '../components/ui/Badge'
 import Modal from '../components/ui/Modal'
 import EmptyState from '../components/ui/EmptyState'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
-import { Plus, Pencil, Trash2, Upload, FileText, CheckCircle2, ArrowLeft, ChevronRight, Search, Filter, Circle } from 'lucide-react'
+import { Plus, Pencil, Trash2, Upload, FileText, CheckCircle2, ArrowLeft, ChevronRight, Search, Filter, Circle, Camera, X } from 'lucide-react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 
 const EMPTY_FORM = {
@@ -25,6 +25,8 @@ const EMPTY_FORM = {
   foto_url: '',
   status: 'Ativo',
   genero: '',
+  atestado_validade: '',
+  atestado_foto: '',
 }
 
 function calcIdade(dataNasc) {
@@ -80,6 +82,10 @@ export default function Alunos() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [matriculas, setMatriculas] = useState([{ polo_id: '', turma_id: '' }])
   const [saving, setSaving] = useState(false)
+  const [uploadingFotoAluno, setUploadingFotoAluno] = useState(false)
+  const [uploadingAtestadoFoto, setUploadingAtestadoFoto] = useState(false)
+  const [alunoErrors, setAlunoErrors] = useState({})
+  const [dupWarningAlunos, setDupWarningAlunos] = useState(null)
 
   // Excluir
   const [deletando, setDeletando] = useState(null)
@@ -125,7 +131,15 @@ export default function Alunos() {
     return list
   })()
 
-  const alunosVisiveis = alunosFiltrados.filter(a => !busca || a.nome?.toLowerCase().includes(busca.toLowerCase()))
+  function norm(str) {
+    return (str ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+  }
+  const alunosVisiveis = alunosFiltrados.filter(a => {
+    if (!busca.trim()) return true
+    const nomeNorm = norm(a.nome)
+    const palavras = norm(busca).split(/\s+/).filter(Boolean)
+    return palavras.every(p => nomeNorm.includes(p))
+  })
 
   // Enriquecer com frequência e ordenar por freq quando dentro de uma turma
   const alunosParaExibir = useMemo(() => {
@@ -190,8 +204,74 @@ export default function Alunos() {
     setForm(f => ({ ...f, [key]: val }))
   }
 
-  async function handleSave() {
-    if (!form.nome.trim()) return
+  async function uploadFotoAluno(file) {
+    if (!file) return
+    setUploadingFotoAluno(true)
+    const ext = file.name.split('.').pop()
+    const fn = `alunos/foto/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+    const { error } = await supabase.storage.from('registros-aula').upload(fn, file)
+    if (!error) {
+      const { data } = supabase.storage.from('registros-aula').getPublicUrl(fn)
+      setField('foto_url', data.publicUrl)
+    }
+    setUploadingFotoAluno(false)
+  }
+
+  async function uploadFotoAtestado(file) {
+    if (!file) return
+    setUploadingAtestadoFoto(true)
+    const ext = file.name.split('.').pop()
+    const fn = `atestados/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+    const { error } = await supabase.storage.from('atestados').upload(fn, file)
+    if (!error) {
+      const { data } = supabase.storage.from('atestados').getPublicUrl(fn)
+      setField('atestado_foto', data.publicUrl)
+    }
+    setUploadingAtestadoFoto(false)
+  }
+
+  function normNomeAluno(s) {
+    return (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()
+  }
+
+  function validateAlunoFormAlunos(f) {
+    const e = {}
+    const nome = (f.nome ?? '').trim()
+    if (!nome) {
+      e.nome = 'Nome é obrigatório'
+    } else if (nome.includes('@')) {
+      e.nome = 'Parece que há um e-mail no campo Nome — verifique'
+    }
+    if (f.email?.trim() && !/\S+@\S+\.\S+/.test(f.email.trim())) {
+      e.email = 'E-mail inválido — pode ser um nome inserido por engano'
+    }
+    if (f.data_nasc) {
+      const nasc = new Date(f.data_nasc + 'T12:00:00')
+      const hoje = new Date()
+      if (nasc > hoje) {
+        e.data_nasc = 'Data de nascimento não pode ser no futuro'
+      } else if (hoje.getFullYear() - nasc.getFullYear() > 120) {
+        e.data_nasc = `Verifique o ano ${nasc.getFullYear()} — parece um erro de digitação`
+      }
+    }
+    return e
+  }
+
+  async function handleSave(forcarSalvar = false) {
+    const errs = validateAlunoFormAlunos(form)
+    if (Object.keys(errs).length > 0) {
+      setAlunoErrors(errs)
+      return
+    }
+    // Duplicate detection (only for new students)
+    if (!editing && !forcarSalvar) {
+      const nomeNorm = normNomeAluno(form.nome)
+      const dup = alunos.find(a => normNomeAluno(a.nome) === nomeNorm)
+      if (dup) {
+        setDupWarningAlunos({ aluno: dup })
+        return
+      }
+    }
     setSaving(true)
     const primeiraTurmaId = matriculas.find(m => m.turma_id)?.turma_id || null
     const payload = {
@@ -207,6 +287,7 @@ export default function Alunos() {
       status: form.status,
       genero: form.genero || null,
     }
+    const temTurmaMelhorIdade = matriculas.some(m => turmas.find(t => t.id === m.turma_id)?.faixa === 'Melhor Idade')
     try {
       let alunoId = editing?.id
       if (editing) {
@@ -214,6 +295,14 @@ export default function Alunos() {
       } else {
         const { data } = await supabase.from('alunos').insert(payload).select('id').single()
         alunoId = data?.id
+        // Save atestado for new Melhor Idade student
+        if (alunoId && temTurmaMelhorIdade && form.atestado_validade) {
+          await supabase.from('atestados').insert({
+            aluno_id: alunoId,
+            data_validade: form.atestado_validade,
+            arquivo_url: form.atestado_foto || null,
+          })
+        }
       }
       // Save aluno_turmas (junction)
       if (alunoId) {
@@ -303,17 +392,11 @@ export default function Alunos() {
           <ArrowLeft size={13}/> Turmas
         </button>
       )}
-      {canEdit && (
-        <>
-          <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()}>
-            <Upload size={13} />
-            <span className="hidden sm:inline">Importar CSV</span>
-          </Button>
-          <Button size="sm" onClick={openNew}>
-            <Plus size={13} />
-            <span className="hidden sm:inline">Novo Aluno</span>
-          </Button>
-        </>
+      {(isAdmin || isCoordenador) && (
+        <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()}>
+          <Upload size={13} />
+          <span className="hidden sm:inline">Importar CSV</span>
+        </Button>
       )}
       <input
         ref={fileInputRef}
@@ -399,17 +482,11 @@ export default function Alunos() {
             icon="🎓"
             title="Nenhum aluno cadastrado"
             description="Cadastre alunos manualmente ou importe um CSV."
-            action={canEdit && (
-              <div className="flex items-center gap-2">
-                <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()}>
-                  <Upload size={13} />
-                  Importar CSV
-                </Button>
-                <Button size="sm" onClick={openNew}>
-                  <Plus size={13} />
-                  Novo Aluno
-                </Button>
-              </div>
+            action={(isAdmin || isCoordenador) && (
+              <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()}>
+                <Upload size={13} />
+                Importar CSV
+              </Button>
             )}
           />
         ) : (
@@ -518,8 +595,8 @@ export default function Alunos() {
       {/* ── Modal Novo / Editar ─────────────────────────────────── */}
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title={editing ? 'Editar Aluno' : 'Novo Aluno'}
+        onClose={() => { setModalOpen(false); setAlunoErrors({}); setDupWarningAlunos(null) }}
+        title="Editar Aluno"
         size="lg"
       >
         <div className="space-y-3">
@@ -530,11 +607,13 @@ export default function Alunos() {
             </label>
             <input
               type="text"
+              autoComplete="new-password" readOnly onFocus={e => e.currentTarget.removeAttribute('readonly')}
               value={form.nome}
-              onChange={e => setField('nome', e.target.value)}
+              onChange={e => { setField('nome', e.target.value); setAlunoErrors(er => ({ ...er, nome: undefined })) }}
               placeholder="Nome completo"
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className={`w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 ${alunoErrors.nome ? 'border-red-400 focus:ring-red-400' : 'border-slate-200'}`}
             />
+            {alunoErrors.nome && <p className="mt-1 text-xs text-red-500">{alunoErrors.nome}</p>}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -543,10 +622,12 @@ export default function Alunos() {
               <label className="block text-xs font-semibold text-slate-600 mb-1">Data de Nascimento</label>
               <input
                 type="date"
+                autoComplete="new-password" readOnly onFocus={e => e.currentTarget.removeAttribute('readonly')}
                 value={form.data_nasc}
-                onChange={e => setField('data_nasc', e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                onChange={e => { setField('data_nasc', e.target.value); setAlunoErrors(er => ({ ...er, data_nasc: undefined })) }}
+                className={`w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 ${alunoErrors.data_nasc ? 'border-red-400 focus:ring-red-400' : 'border-slate-200'}`}
               />
+              {alunoErrors.data_nasc && <p className="mt-1 text-xs text-red-500">{alunoErrors.data_nasc}</p>}
             </div>
 
             {/* CPF */}
@@ -554,6 +635,7 @@ export default function Alunos() {
               <label className="block text-xs font-semibold text-slate-600 mb-1">CPF</label>
               <input
                 type="text"
+                autoComplete="new-password" readOnly onFocus={e => e.currentTarget.removeAttribute('readonly')}
                 value={form.cpf}
                 onChange={e => setField('cpf', e.target.value)}
                 placeholder="000.000.000-00"
@@ -566,6 +648,7 @@ export default function Alunos() {
               <label className="block text-xs font-semibold text-slate-600 mb-1">Telefone</label>
               <input
                 type="text"
+                autoComplete="new-password" readOnly onFocus={e => e.currentTarget.removeAttribute('readonly')}
                 value={form.telefone}
                 onChange={e => setField('telefone', e.target.value)}
                 placeholder="(00) 00000-0000"
@@ -578,6 +661,7 @@ export default function Alunos() {
               <label className="block text-xs font-semibold text-slate-600 mb-1">Tel. Emergência</label>
               <input
                 type="text"
+                autoComplete="new-password" readOnly onFocus={e => e.currentTarget.removeAttribute('readonly')}
                 value={form.telefone_emergencia}
                 onChange={e => setField('telefone_emergencia', e.target.value)}
                 placeholder="(00) 00000-0000"
@@ -589,12 +673,14 @@ export default function Alunos() {
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">E-mail</label>
               <input
-                type="email"
+                type="text"
+                autoComplete="new-password" readOnly onFocus={e => e.currentTarget.removeAttribute('readonly')}
                 value={form.email}
-                onChange={e => setField('email', e.target.value)}
+                onChange={e => { setField('email', e.target.value); setAlunoErrors(er => ({ ...er, email: undefined })) }}
                 placeholder="aluno@email.com"
-                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                className={`w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 ${alunoErrors.email ? 'border-red-400 focus:ring-red-400' : 'border-slate-200'}`}
               />
+              {alunoErrors.email && <p className="mt-1 text-xs text-red-500">{alunoErrors.email}</p>}
             </div>
 
             {/* Status */}
@@ -684,21 +770,78 @@ export default function Alunos() {
             />
           </div>
 
-          {/* Foto URL */}
+          {/* Foto do Aluno */}
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">URL da Foto</label>
-            <input
-              type="text"
-              value={form.foto_url}
-              onChange={e => setField('foto_url', e.target.value)}
-              placeholder="https://..."
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-            />
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Foto do Aluno</label>
+            <div className="flex items-center gap-4">
+              {form.foto_url ? (
+                <div className="relative flex-shrink-0">
+                  <img src={form.foto_url} alt="foto" className="w-16 h-16 rounded-full object-cover border-2 border-primary-200" />
+                  <button type="button" onClick={() => setField('foto_url', '')}
+                    className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600">
+                    <X size={10}/>
+                  </button>
+                </div>
+              ) : (
+                <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center border-2 border-dashed border-slate-200 flex-shrink-0">
+                  <Camera size={20} className="text-slate-300" />
+                </div>
+              )}
+              <div className="flex flex-col gap-2">
+                <label className={`flex items-center gap-1.5 text-[11px] font-semibold text-primary-600 cursor-pointer hover:text-primary-700 ${uploadingFotoAluno ? 'opacity-50 pointer-events-none' : ''}`}>
+                  <Camera size={12}/> Tirar Foto
+                  <input type="file" accept="image/*" capture="environment" className="hidden"
+                    onChange={e => uploadFotoAluno(e.target.files?.[0])} />
+                </label>
+                <label className={`flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 cursor-pointer hover:text-slate-700 ${uploadingFotoAluno ? 'opacity-50 pointer-events-none' : ''}`}>
+                  <Upload size={12}/> Escolher da Galeria
+                  <input type="file" accept="image/*" className="hidden"
+                    onChange={e => uploadFotoAluno(e.target.files?.[0])} />
+                </label>
+                {uploadingFotoAluno && <p className="text-[10px] text-slate-400 animate-pulse">Enviando...</p>}
+              </div>
+            </div>
           </div>
 
+          {/* Atestado médico — somente para turmas Melhor Idade */}
+          {matriculas.some(m => turmas.find(t => t.id === m.turma_id)?.faixa === 'Melhor Idade') && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-3">
+              <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wide">🏥 Atestado Médico — Melhor Idade</p>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Validade do Atestado</label>
+                <input type="date" value={form.atestado_validade}
+                  onChange={e => setField('atestado_validade', e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Foto do Atestado</label>
+                {form.atestado_foto ? (
+                  <div className="flex items-center gap-2">
+                    <a href={form.atestado_foto} target="_blank" rel="noreferrer" className="text-[11px] text-primary-600 hover:underline">✓ Ver atestado enviado</a>
+                    <button type="button" onClick={() => setField('atestado_foto', '')} className="text-[10px] text-red-400 hover:text-red-600">Remover</button>
+                  </div>
+                ) : (
+                  <div className="flex gap-3">
+                    <label className={`flex items-center gap-1.5 text-[11px] font-semibold text-primary-600 cursor-pointer hover:text-primary-700 ${uploadingAtestadoFoto ? 'opacity-50 pointer-events-none' : ''}`}>
+                      <Camera size={12}/> Fotografar
+                      <input type="file" accept="image/*" capture="environment" className="hidden"
+                        onChange={e => uploadFotoAtestado(e.target.files?.[0])} />
+                    </label>
+                    <label className={`flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 cursor-pointer hover:text-slate-700 ${uploadingAtestadoFoto ? 'opacity-50 pointer-events-none' : ''}`}>
+                      <Upload size={12}/> Galeria / PDF
+                      <input type="file" accept="image/*,.pdf" className="hidden"
+                        onChange={e => uploadFotoAtestado(e.target.files?.[0])} />
+                    </label>
+                    {uploadingAtestadoFoto && <p className="text-[10px] text-slate-400 animate-pulse">Enviando...</p>}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-2 justify-end pt-2">
-            <Button variant="secondary" size="sm" onClick={() => setModalOpen(false)}>Cancelar</Button>
-            <Button size="sm" onClick={handleSave} disabled={saving || !form.nome.trim()}>
+            <Button variant="secondary" size="sm" onClick={() => { setModalOpen(false); setAlunoErrors({}); setDupWarningAlunos(null) }}>Cancelar</Button>
+            <Button size="sm" onClick={() => handleSave()} disabled={saving}>
               {saving ? 'Salvando...' : 'Salvar'}
             </Button>
           </div>
@@ -783,6 +926,14 @@ export default function Alunos() {
         onConfirm={handleDelete}
         title="Excluir Aluno"
         description={`Excluir "${deletando?.nome}" permanentemente? Esta ação não pode ser desfeita.`}
+      />
+
+      <ConfirmDialog
+        open={!!dupWarningAlunos}
+        title="Aluno possivelmente duplicado"
+        description={`Já existe um aluno chamado "${dupWarningAlunos?.aluno?.nome}" no sistema. Deseja cadastrar mesmo assim?`}
+        onConfirm={() => { setDupWarningAlunos(null); handleSave(true) }}
+        onClose={() => setDupWarningAlunos(null)}
       />
     </div>
   )

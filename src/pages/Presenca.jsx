@@ -1,8 +1,9 @@
 // src/pages/Presenca.jsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useSupabaseData } from '../hooks/useSupabaseData'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
+import { logAcao } from '../lib/auditLog'
 import Topbar from '../components/Topbar'
 import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
@@ -38,31 +39,38 @@ export default function Presenca() {
     '*, modalidades(nome), polos(nome), profiles(nome)'
   )
 
-  // Estagiário vinculos
-  const [vinculoTurmaIds, setVinculoTurmaIds] = useState(null)
+  // IDs de turmas acessíveis para professor/estagiário, lidos de `atribuicoes`
+  // null = ainda carregando | array = carregado (pode ser vazio)
+  const [myTurmaIds, setMyTurmaIds] = useState(null)
+
   useEffect(() => {
     if (!profile) return
-    if (isEstagiario) {
-      supabase
-        .from('vinculos_estagiario_turma')
-        .select('turma_id')
-        .eq('estagiario_id', profile.id)
-        .then(({ data }) => {
-          setVinculoTurmaIds((data ?? []).map((v) => v.turma_id))
-        })
-    } else {
-      setVinculoTurmaIds(null)
+    if (isAdmin || isCoordenador) {
+      setMyTurmaIds(null) // null = acesso total (tratado abaixo)
+      return
     }
-  }, [profile, isEstagiario])
+    // Professor e estagiário: busca na tabela atribuicoes (fonte única de verdade)
+    supabase
+      .from('atribuicoes')
+      .select('turma_id')
+      .eq('usuario_id', profile.id)
+      .not('turma_id', 'is', null)
+      .then(({ data }) => {
+        setMyTurmaIds((data ?? []).map((a) => a.turma_id))
+      })
+  }, [profile, isAdmin, isCoordenador])
 
-  // Filtered turmas by role
+  // Filtered turmas by role — totalmente dinâmico via atribuicoes
   const turmas = (() => {
     if (!profile || turmasLoading) return []
     if (isAdmin || isCoordenador) return allTurmas
-    if (isProfessor) return allTurmas.filter((t) => t.professor_id === profile.id)
-    if (isEstagiario && vinculoTurmaIds !== null)
-      return allTurmas.filter((t) => vinculoTurmaIds.includes(t.id))
-    return []
+    // Ainda carregando as atribuições
+    if (!isAdmin && !isCoordenador && myTurmaIds === null) return []
+    const ids = new Set(myTurmaIds ?? [])
+    // Para professor: também inclui turmas com professor_id (compatibilidade)
+    return allTurmas.filter(
+      (t) => ids.has(t.id) || (isProfessor && t.professor_id === profile.id)
+    )
   })()
 
   // Selection state
@@ -80,9 +88,33 @@ export default function Presenca() {
   const [history, setHistory] = useState([])
   const [historyLoading, setHistoryLoading] = useState(false)
 
+  // IDs dos registros já existentes no banco: { [alunoId]: presencaRowId }
+  const [existingIds, setExistingIds] = useState({})
+
   // Save state
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState(null)
+
+  // Verifica se está na janela permitida para salvar
+  // Permite: dia de hoje dentro de 30min após a aula (horário + 90min)
+  // Permite também: data futura
+  // Bloqueia: datas passadas fora da janela
+  function isEditavel() {
+    if (!dataSel) return false
+    const hoje = todayIso()
+    if (dataSel > hoje) return true   // futura — pode preparar
+    if (dataSel < hoje) return false  // passada — somente leitura
+    // hoje: verifica janela
+    if (!selectedTurma?.horario) return true // sem horário = libera
+    const [h, m] = selectedTurma.horario.split(':').map(Number)
+    const agora = new Date()
+    const agoraMins = agora.getHours() * 60 + agora.getMinutes()
+    const inicioMins = h * 60 + m
+    const fimMins = inicioMins + 90 // aula de 60min + 30min tolerância
+    return agoraMins >= inicioMins - 15 && agoraMins <= fimMins
+  }
+
+  const editavel = isEditavel()
 
   // Load alunos + existing presencas when turma or date changes
   useEffect(() => {
@@ -100,7 +132,6 @@ export default function Presenca() {
           .from('alunos')
           .select('id,nome,status')
           .eq('turma_id', turmaId)
-          .eq('status', 'Ativo')
           .order('nome'),
         supabase
           .from('presencas')
@@ -110,18 +141,26 @@ export default function Presenca() {
       ])
       if (cancelled) return
 
-      const rows = alunosData ?? []
+      // Ordena: ativos primeiro, depois inativos/transferidos
+      const rows = (alunosData ?? []).sort((a, b) => {
+        const aAtivo = a.status === 'Ativo' ? 0 : 1
+        const bAtivo = b.status === 'Ativo' ? 0 : 1
+        return aAtivo - bAtivo || (a.nome ?? '').localeCompare(b.nome ?? '', 'pt-BR')
+      })
       const pMap = {}
+      const idMap = {}
       for (const p of presencasData ?? []) {
         pMap[p.aluno_id] = p.presente
+        idMap[p.aluno_id] = p.id
       }
-      // Initialize: if existing record use it, otherwise undefined (untouched)
+      // Initialize: se já existe registro usa o valor; caso contrário fica undefined (intocado)
       const initState = {}
       for (const a of rows) {
         if (a.id in pMap) initState[a.id] = pMap[a.id]
       }
       setAlunos(rows)
       setPresencaState(initState)
+      setExistingIds(idMap)
       setAlunosLoading(false)
     }
     load()
@@ -157,30 +196,83 @@ export default function Presenca() {
 
   async function handleSave() {
     if (!turmaId || !dataSel || alunos.length === 0) return
+
+    // Só salva alunos que foram explicitamente marcados (presente ou falta)
+    const touched = alunos.filter((a) => a.id in presencaState)
+    if (!touched.length) {
+      setSaveMsg({ type: 'error', text: 'Marque ao menos um aluno antes de salvar.' })
+      setTimeout(() => setSaveMsg(null), 3000)
+      return
+    }
+
     setSaving(true)
     setSaveMsg(null)
-    const records = alunos.map((a) => ({
-      turma_id: turmaId,
-      aluno_id: a.id,
-      registrado_por: profile.id,
-      data: dataSel,
-      presente: presencaState[a.id] ?? false,
-    }))
-    const { error } = await supabase
+
+    // Re-busca registros existentes agora para evitar conflito com salvamentos simultâneos
+    const { data: latestPresencas } = await supabase
       .from('presencas')
-      .upsert(records, { onConflict: 'turma_id,aluno_id,data' })
+      .select('id,aluno_id')
+      .eq('turma_id', turmaId)
+      .eq('data', dataSel)
+
+    const latestIds = {}
+    for (const p of latestPresencas ?? []) latestIds[p.aluno_id] = p.id
+
+    const errors = []
+    const newIds = { ...latestIds }
+
+    for (const aluno of touched) {
+      const val = presencaState[aluno.id]
+      const rowId = latestIds[aluno.id]
+
+      if (rowId) {
+        // Registro já existe → atualiza
+        const { error } = await supabase
+          .from('presencas')
+          .update({ presente: val, registrado_por: profile.id })
+          .eq('id', rowId)
+        if (error) errors.push(error)
+      } else {
+        // Registro novo → insere
+        const { data: inserted, error } = await supabase
+          .from('presencas')
+          .insert({
+            turma_id: turmaId,
+            aluno_id: aluno.id,
+            registrado_por: profile.id,
+            data: dataSel,
+            presente: val,
+          })
+          .select('id')
+          .single()
+        if (error) errors.push(error)
+        else if (inserted) newIds[aluno.id] = inserted.id
+      }
+    }
+
+    // Atualiza IDs conhecidos para próximos salvamentos
+    setExistingIds(prev => ({ ...prev, ...newIds }))
+
     setSaving(false)
-    if (error) {
-      setSaveMsg({ type: 'error', text: 'Erro ao salvar: ' + error.message })
+    if (errors.length) {
+      setSaveMsg({ type: 'error', text: `Erro ao salvar ${errors.length} registro(s).` })
     } else {
-      setSaveMsg({ type: 'success', text: 'Presença salva com sucesso!' })
-      // Refresh history
-      const { data } = await supabase
+      setSaveMsg({ type: 'success', text: `✓ ${touched.length} presença(s) salva(s)!` })
+      // Registra auditoria
+      const turmaAtual = turmas.find((t) => t.id === turmaId)
+      logAcao({
+        acao: 'registro_presenca',
+        perfil: profile,
+        turma: turmaAtual,
+        detalhes: `${touched.length} marcação(ões) para ${dataSel}`,
+      })
+      // Atualiza histórico
+      const { data: histData } = await supabase
         .from('presencas')
         .select('*')
         .eq('turma_id', turmaId)
         .gte('data', date7daysAgoIso())
-      setHistory(data ?? [])
+      setHistory(histData ?? [])
       setTimeout(() => setSaveMsg(null), 3000)
     }
   }
@@ -195,9 +287,10 @@ export default function Presenca() {
     historyMap[p.aluno_id][p.data] = p.presente
   }
 
-  const totalPresentes = Object.values(presencaState).filter(Boolean).length
-  const totalFaltas = Object.values(presencaState).filter((v) => v === false).length
-  const totalNaoMarcados = alunos.length - Object.keys(presencaState).length
+  const alunosAtivos = alunos.filter(a => a.status === 'Ativo')
+  const totalPresentes = alunosAtivos.filter(a => presencaState[a.id] === true).length
+  const totalFaltas = alunosAtivos.filter(a => presencaState[a.id] === false).length
+  const totalNaoMarcados = alunosAtivos.filter(a => !(a.id in presencaState)).length
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -284,51 +377,69 @@ export default function Presenca() {
               <div className="p-8">
                 <EmptyState
                   icon={<Users size={32} className="text-slate-300" />}
-                  title="Nenhum aluno ativo nesta turma"
-                  description="Adicione alunos ativos para registrar a presença."
+                  title="Nenhum aluno nesta turma"
+                  description="Adicione alunos para registrar a presença."
                 />
               </div>
             ) : (
               <ul className="divide-y divide-slate-100">
-                {alunos.map((aluno) => (
-                  <li key={aluno.id} className="flex items-center justify-between px-4 py-3 hover:bg-slate-50/60 transition-colors">
-                    <span className="text-sm font-medium text-slate-800">{aluno.nome}</span>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => toggle(aluno.id, true)}
-                        className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                          presencaState[aluno.id] === true
-                            ? 'bg-primary-600 text-white shadow-sm'
-                            : 'bg-slate-100 text-slate-500 hover:bg-primary-50 hover:text-primary-700'
-                        }`}
-                      >
-                        <Check size={12} /> Presente
-                      </button>
-                      <button
-                        onClick={() => toggle(aluno.id, false)}
-                        className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                          presencaState[aluno.id] === false
-                            ? 'bg-red-500 text-white shadow-sm'
-                            : 'bg-slate-100 text-slate-500 hover:bg-red-50 hover:text-red-600'
-                        }`}
-                      >
-                        <X size={12} /> Falta
-                      </button>
-                    </div>
-                  </li>
-                ))}
+                {alunos.map((aluno) => {
+                  const ativo = aluno.status === 'Ativo'
+                  return (
+                    <li key={aluno.id} className={`flex items-center justify-between px-4 py-3 transition-colors ${ativo ? 'hover:bg-slate-50/60' : 'opacity-60 bg-slate-50/40 dark:bg-navy-900/20'}`}>
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <span className={`text-sm font-medium truncate ${ativo ? 'text-slate-800' : 'text-slate-400 dark:text-slate-500'}`}>{aluno.nome}</span>
+                        {!ativo && (
+                          <span className={`flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+                            aluno.status === 'Transferido'
+                              ? 'text-amber-700 bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-700 dark:text-amber-400'
+                              : 'text-slate-500 bg-slate-100 border-slate-200 dark:bg-navy-700 dark:border-navy-600 dark:text-slate-400'
+                          }`}>
+                            {aluno.status}
+                          </span>
+                        )}
+                      </div>
+                      {ativo ? (
+                        <div className="flex gap-2 flex-shrink-0">
+                          <button
+                            onClick={() => toggle(aluno.id, true)}
+                            className={`inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                              presencaState[aluno.id] === true
+                                ? 'bg-primary-600 text-white shadow-sm'
+                                : 'bg-slate-100 text-slate-500 hover:bg-primary-50 hover:text-primary-700'
+                            }`}
+                          >
+                            <Check size={12} /> Presente
+                          </button>
+                          <button
+                            onClick={() => toggle(aluno.id, false)}
+                            className={`inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                              presencaState[aluno.id] === false
+                                ? 'bg-red-500 text-white shadow-sm'
+                                : 'bg-slate-100 text-slate-500 hover:bg-red-50 hover:text-red-600'
+                            }`}
+                          >
+                            <X size={12} /> Falta
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-slate-400 flex-shrink-0 italic">sem registro</span>
+                      )}
+                    </li>
+                  )
+                })}
               </ul>
             )}
 
             {alunos.length > 0 && (
-              <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between">
+              <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between gap-3 flex-wrap">
                 {saveMsg ? (
-                  <span
-                    className={`text-xs font-medium ${
-                      saveMsg.type === 'success' ? 'text-primary-600' : 'text-red-500'
-                    }`}
-                  >
+                  <span className={`text-xs font-medium ${saveMsg.type === 'success' ? 'text-primary-600' : 'text-red-500'}`}>
                     {saveMsg.text}
+                  </span>
+                ) : !editavel ? (
+                  <span className="text-xs text-amber-600 font-medium">
+                    🔒 {dataSel < todayIso() ? 'Presença finalizada — somente leitura' : 'Fora da janela de registro (±15min antes até 30min após a aula)'}
                   </span>
                 ) : (
                   <span />
@@ -337,7 +448,7 @@ export default function Presenca() {
                   variant="primary"
                   size="sm"
                   onClick={handleSave}
-                  disabled={saving}
+                  disabled={saving || !editavel}
                 >
                   <Save size={13} />
                   {saving ? 'Salvando…' : 'Salvar Presença'}

@@ -148,7 +148,12 @@ export default function AlunoDetalhe() {
     setAtForm(EMPTY_AT); setArquivo(null); setEditingAt(null); setAtModalOpen(true)
   }
   function openEditAt(a) {
-    setAtForm({ data_emissao: a.data_emissao ?? '', data_validade: a.data_validade ?? '', observacao: a.observacao ?? '', arquivo_url: a.arquivo_url ?? '' })
+    setAtForm({
+      data_emissao: a.data_emissao?.slice(0, 10) ?? '',
+      data_validade: a.data_validade?.slice(0, 10) ?? '',
+      observacao: a.observacao ?? '',
+      arquivo_url: a.arquivo_url ?? ''
+    })
     setArquivo(null); setEditingAt(a); setAtModalOpen(true)
   }
 
@@ -305,7 +310,7 @@ export default function AlunoDetalhe() {
         {tab === 'frequencia' && (
           <div className="space-y-3">
             {/* Resumo */}
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-3 sm:grid-cols-3 gap-2 sm:gap-3">
               <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
                 <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1">Freq. Geral</p>
                 <p className="text-3xl font-extrabold text-navy-900 dark:text-white">{freqGeral}%</p>
@@ -440,7 +445,7 @@ export default function AlunoDetalhe() {
       {/* Modal Atestado */}
       <Modal open={atModalOpen} onClose={() => setAtModalOpen(false)} title={editingAt ? 'Editar Atestado' : 'Novo Atestado'}>
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Data de Emissão</label>
               <input type="date" value={atForm.data_emissao} onChange={e => setAtForm(f => ({ ...f, data_emissao: e.target.value }))}

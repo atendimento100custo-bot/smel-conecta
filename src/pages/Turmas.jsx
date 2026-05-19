@@ -118,7 +118,7 @@ export default function Turmas() {
           <EmptyState icon="📚" title="Nenhuma turma cadastrada"
             action={canEdit && <Button size="sm" onClick={openNew}><Plus size={13}/> Nova Turma</Button>} />
         ) : (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {turmasFiltradas.map(t => (
               <div key={t.id} className="bg-white rounded-xl border border-slate-200 p-4">
                 <div className="flex items-start justify-between mb-2">
@@ -216,7 +216,7 @@ export default function Turmas() {
             <div className="flex gap-1.5 flex-wrap">
               {DIAS.map(d => (
                 <button key={d} type="button" onClick={() => toggleDia(d)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
+                  className={`px-3 py-2 rounded-lg text-[11px] font-semibold transition-colors ${
                     form.dias.includes(d) ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}>{d}</button>
               ))}
