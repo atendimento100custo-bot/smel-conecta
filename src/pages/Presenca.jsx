@@ -273,15 +273,30 @@ export default function Presenca() {
     if (errors.length) {
       setSaveMsg({ type: 'error', text: `Erro ao salvar ${errors.length} registro(s).` })
     } else {
-      setSaveMsg({ type: 'success', text: `✓ ${touched.length} presença(s) salva(s)!` })
-      // Registra auditoria
-      const turmaAtual = turmas.find((t) => t.id === turmaId)
-      logAcao({
-        acao: 'registro_presenca',
-        perfil: profile,
-        turma: turmaAtual,
-        detalhes: `${touched.length} marcação(ões) para ${dataSel}`,
+      // Calcula frequência: (presentes + justificados) / total de ativos
+      const totalAtivos = alunosAtivos.length
+      const presentesCount = alunosAtivos.filter(a => presencaState[a.id] === 'presente').length
+      const justifCount    = alunosAtivos.filter(a => presencaState[a.id] === 'justificado').length
+      const freq = totalAtivos > 0
+        ? Math.round(((presentesCount + justifCount) / totalAtivos) * 100)
+        : 0
+
+      setSaveMsg({
+        type: 'success',
+        text: `✅ Chamada salva! ${presentesCount} presente${presentesCount !== 1 ? 's' : ''} · ${freq}% de frequência`
       })
+
+      // Registra auditoria
+      const turmaAtual = turmas.find(t => t.id === turmaId)
+      if (typeof logAcao === 'function') {
+        logAcao({
+          acao: 'registro_presenca',
+          perfil: profile,
+          turma: turmaAtual,
+          detalhes: `${touched.length} marcação(ões) para ${dataSel} — ${freq}% frequência`,
+        })
+      }
+
       // Atualiza histórico
       const { data: histData } = await supabase
         .from('presencas')
@@ -289,7 +304,8 @@ export default function Presenca() {
         .eq('turma_id', turmaId)
         .gte('data', date7daysAgoIso())
       setHistory(histData ?? [])
-      setTimeout(() => setSaveMsg(null), 3000)
+
+      setTimeout(() => setSaveMsg(null), 4000)
     }
   }
 
@@ -433,7 +449,48 @@ export default function Presenca() {
                   description="Adicione alunos para registrar a presença."
                 />
               </div>
+            ) : !editavel && dataSel <= todayIso() && alunos.some(a => a.id in presencaState) ? (
+              /* VIEW SOMENTE-LEITURA: chamada já registrada e janela fechada */
+              <ul className="divide-y divide-slate-100 dark:divide-navy-700">
+                {alunos.map(aluno => {
+                  const st = presencaState[aluno.id]
+                  const mot = motivoState[aluno.id]
+                  return (
+                    <li key={aluno.id} className="flex items-center justify-between px-4 py-3">
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate block">
+                          {aluno.nome}
+                        </span>
+                        {mot && (
+                          <span className="text-[10px] text-amber-600 dark:text-amber-400">{mot}</span>
+                        )}
+                      </div>
+                      <div className="flex-shrink-0 ml-3">
+                        {st === 'presente' && (
+                          <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400 px-2.5 py-1 rounded-full">
+                            <Check size={11} /> Presente
+                          </span>
+                        )}
+                        {st === 'falta' && (
+                          <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 bg-red-50 dark:bg-red-900/30 dark:text-red-400 px-2.5 py-1 rounded-full">
+                            <X size={11} /> Falta
+                          </span>
+                        )}
+                        {st === 'justificado' && (
+                          <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 dark:bg-amber-900/30 dark:text-amber-400 px-2.5 py-1 rounded-full">
+                            📋 Justificada
+                          </span>
+                        )}
+                        {!st && (
+                          <span className="text-xs text-slate-400 italic">Sem registro</span>
+                        )}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
             ) : (
+              /* VIEW EDITÁVEL: lista com botões */
               <ul className="divide-y divide-slate-100">
                 {alunos.map((aluno) => {
                   const ativo = aluno.status === 'Ativo'
