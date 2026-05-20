@@ -81,8 +81,13 @@ export default function Presenca() {
   const [alunos, setAlunos] = useState([])
   const [alunosLoading, setAlunosLoading] = useState(false)
 
-  // Presença state: { [alunoId]: true | false }
+  // Presença state: { [alunoId]: 'presente' | 'falta' | 'justificado' }
   const [presencaState, setPresencaState] = useState({})
+
+  // Motivo state: { [alunoId]: string }
+  const [motivoState, setMotivoState] = useState({})
+  // alunoId com input de motivo expandido
+  const [motivoAberto, setMotivoAberto] = useState(null)
 
   // History presencas (last 7 days)
   const [history, setHistory] = useState([])
@@ -135,7 +140,7 @@ export default function Presenca() {
           .order('nome'),
         supabase
           .from('presencas')
-          .select('*')
+          .select('id,aluno_id,status,motivo')
           .eq('turma_id', turmaId)
           .eq('data', dataSel),
       ])
@@ -147,11 +152,13 @@ export default function Presenca() {
         const bAtivo = b.status === 'Ativo' ? 0 : 1
         return aAtivo - bAtivo || (a.nome ?? '').localeCompare(b.nome ?? '', 'pt-BR')
       })
+      const motivoMap = {}
       const pMap = {}
       const idMap = {}
       for (const p of presencasData ?? []) {
-        pMap[p.aluno_id] = p.presente
+        pMap[p.aluno_id] = p.status   // agora string: 'presente'|'falta'|'justificado'
         idMap[p.aluno_id] = p.id
+        if (p.motivo) motivoMap[p.aluno_id] = p.motivo
       }
       // Initialize: se já existe registro usa o valor; caso contrário fica undefined (intocado)
       const initState = {}
@@ -161,6 +168,8 @@ export default function Presenca() {
       setAlunos(rows)
       setPresencaState(initState)
       setExistingIds(idMap)
+      setMotivoState(motivoMap)
+      setMotivoAberto(null)
       setAlunosLoading(false)
     }
     load()
@@ -191,7 +200,12 @@ export default function Presenca() {
   }, [turmaId])
 
   function toggle(alunoId, value) {
-    setPresencaState((prev) => ({ ...prev, [alunoId]: value }))
+    setPresencaState(prev => ({ ...prev, [alunoId]: value }))
+    if (value === 'justificado') {
+      setMotivoAberto(alunoId)  // abre campo de motivo
+    } else {
+      setMotivoAberto(prev => prev === alunoId ? null : prev)
+    }
   }
 
   async function handleSave() {
@@ -222,14 +236,15 @@ export default function Presenca() {
     const newIds = { ...latestIds }
 
     for (const aluno of touched) {
-      const val = presencaState[aluno.id]
+      const val = presencaState[aluno.id]   // agora string: 'presente'|'falta'|'justificado'
+      const motivo = val === 'justificado' ? (motivoState[aluno.id] ?? null) : null
       const rowId = latestIds[aluno.id]
 
       if (rowId) {
         // Registro já existe → atualiza
         const { error } = await supabase
           .from('presencas')
-          .update({ presente: val, registrado_por: profile.id })
+          .update({ status: val, motivo, registrado_por: profile.id })
           .eq('id', rowId)
         if (error) errors.push(error)
       } else {
@@ -241,7 +256,8 @@ export default function Presenca() {
             aluno_id: aluno.id,
             registrado_por: profile.id,
             data: dataSel,
-            presente: val,
+            status: val,
+            motivo,
           })
           .select('id')
           .single()
@@ -280,17 +296,18 @@ export default function Presenca() {
   const selectedTurma = turmas.find((t) => t.id === turmaId)
   const dateRange = buildDateRange()
 
-  // Build history map: { alunoId: { date: presente } }
+  // Build history map: { alunoId: { date: status } }
   const historyMap = {}
   for (const p of history) {
     if (!historyMap[p.aluno_id]) historyMap[p.aluno_id] = {}
-    historyMap[p.aluno_id][p.data] = p.presente
+    historyMap[p.aluno_id][p.data] = p.status  // era p.presente
   }
 
   const alunosAtivos = alunos.filter(a => a.status === 'Ativo')
-  const totalPresentes = alunosAtivos.filter(a => presencaState[a.id] === true).length
-  const totalFaltas = alunosAtivos.filter(a => presencaState[a.id] === false).length
-  const totalNaoMarcados = alunosAtivos.filter(a => !(a.id in presencaState)).length
+  const totalPresentes    = alunosAtivos.filter(a => presencaState[a.id] === 'presente').length
+  const totalFaltas       = alunosAtivos.filter(a => presencaState[a.id] === 'falta').length
+  const totalJustificados = alunosAtivos.filter(a => presencaState[a.id] === 'justificado').length
+  const totalNaoMarcados  = alunosAtivos.filter(a => !(a.id in presencaState)).length
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -402,9 +419,9 @@ export default function Presenca() {
                       {ativo ? (
                         <div className="flex gap-2 flex-shrink-0">
                           <button
-                            onClick={() => toggle(aluno.id, true)}
+                            onClick={() => toggle(aluno.id, 'presente')}
                             className={`inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                              presencaState[aluno.id] === true
+                              presencaState[aluno.id] === 'presente'
                                 ? 'bg-primary-600 text-white shadow-sm'
                                 : 'bg-slate-100 text-slate-500 hover:bg-primary-50 hover:text-primary-700'
                             }`}
@@ -412,9 +429,9 @@ export default function Presenca() {
                             <Check size={12} /> Presente
                           </button>
                           <button
-                            onClick={() => toggle(aluno.id, false)}
+                            onClick={() => toggle(aluno.id, 'falta')}
                             className={`inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                              presencaState[aluno.id] === false
+                              presencaState[aluno.id] === 'falta'
                                 ? 'bg-red-500 text-white shadow-sm'
                                 : 'bg-slate-100 text-slate-500 hover:bg-red-50 hover:text-red-600'
                             }`}
@@ -501,10 +518,12 @@ export default function Presenca() {
                           const val = historyMap[aluno.id]?.[d]
                           return (
                             <td key={d} className="px-2 py-2 text-center">
-                              {val === true ? (
+                              {val === 'presente' ? (
                                 <span className="inline-block w-4 h-4 rounded-full bg-primary-500" title="Presente" />
-                              ) : val === false ? (
+                              ) : val === 'falta' ? (
                                 <span className="inline-block w-4 h-4 rounded-full bg-red-400" title="Falta" />
+                              ) : val === 'justificado' ? (
+                                <span className="inline-block w-4 h-4 rounded-full bg-amber-400" title="Justificada" />
                               ) : (
                                 <span className="inline-block w-4 h-4 rounded-full bg-slate-200" title="Sem registro" />
                               )}
@@ -525,6 +544,9 @@ export default function Presenca() {
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="inline-block w-3 h-3 rounded-full bg-red-400" /> Falta
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-3 h-3 rounded-full bg-amber-400" /> Justificada
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="inline-block w-3 h-3 rounded-full bg-slate-200" /> Sem registro
