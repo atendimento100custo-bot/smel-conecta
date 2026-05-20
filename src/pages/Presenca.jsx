@@ -8,7 +8,7 @@ import Topbar from '../components/Topbar'
 import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
 import EmptyState from '../components/ui/EmptyState'
-import { Check, X, Save, Users } from 'lucide-react'
+import { Check, X, Save, Users, Clock } from 'lucide-react'
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10)
@@ -373,22 +373,29 @@ export default function Presenca() {
                   </p>
                 )}
               </div>
-              {alunos.length > 0 && (
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="inline-flex items-center gap-1 bg-primary-50 text-primary-700 px-2 py-0.5 rounded-full font-semibold">
-                    <Check size={11} /> {totalPresentes}
-                  </span>
-                  <span className="inline-flex items-center gap-1 bg-red-50 text-red-600 px-2 py-0.5 rounded-full font-semibold">
-                    <X size={11} /> {totalFaltas}
-                  </span>
-                  {totalNaoMarcados > 0 && (
-                    <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-semibold">
-                      ? {totalNaoMarcados}
-                    </span>
-                  )}
-                </div>
-              )}
             </div>
+
+            {/* Placar ao vivo */}
+            {alunos.length > 0 && (
+              <div className="px-4 py-3 border-b border-slate-100 grid grid-cols-4 gap-2">
+                <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-2.5 text-center">
+                  <div className="text-xl font-extrabold text-emerald-600 dark:text-emerald-400 leading-none">{totalPresentes}</div>
+                  <div className="text-[9px] font-bold text-emerald-600 dark:text-emerald-500 uppercase tracking-wide mt-1">✅ Presentes</div>
+                </div>
+                <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-2.5 text-center">
+                  <div className="text-xl font-extrabold text-red-500 dark:text-red-400 leading-none">{totalFaltas}</div>
+                  <div className="text-[9px] font-bold text-red-500 dark:text-red-400 uppercase tracking-wide mt-1">❌ Faltas</div>
+                </div>
+                <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-2.5 text-center">
+                  <div className="text-xl font-extrabold text-amber-500 dark:text-amber-400 leading-none">{totalJustificados}</div>
+                  <div className="text-[9px] font-bold text-amber-500 dark:text-amber-400 uppercase tracking-wide mt-1">📋 Justif.</div>
+                </div>
+                <div className="bg-slate-100 dark:bg-navy-700 rounded-lg p-2.5 text-center">
+                  <div className="text-xl font-extrabold text-slate-400 leading-none">{totalNaoMarcados}</div>
+                  <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wide mt-1">⏳ Pend.</div>
+                </div>
+              </div>
+            )}
 
             {alunosLoading ? (
               <div className="p-8 text-center text-sm text-slate-400">Carregando alunos…</div>
