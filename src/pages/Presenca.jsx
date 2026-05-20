@@ -204,7 +204,9 @@ export default function Presenca() {
     if (value === 'justificado') {
       setMotivoAberto(alunoId)  // abre campo de motivo
     } else {
-      setMotivoAberto(prev => prev === alunoId ? null : prev)
+      setMotivoAberto(null)  // fecha o campo para qualquer aluno
+      // limpa o motivo se o usuário sair de 'justificado'
+      setMotivoState(prev => ({ ...prev, [alunoId]: '' }))
     }
   }
 
@@ -462,7 +464,6 @@ export default function Presenca() {
                                 onChange={e => setMotivoState(prev => ({ ...prev, [aluno.id]: e.target.value }))}
                                 placeholder="Motivo (ex: atestado médico)…"
                                 className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-amber-300 bg-amber-50 focus:outline-none focus:ring-1 focus:ring-amber-400 text-amber-900 placeholder-amber-400"
-                                autoFocus
                               />
                             </div>
                           )}
