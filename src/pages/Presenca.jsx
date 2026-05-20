@@ -100,23 +100,21 @@ export default function Presenca() {
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState(null)
 
-  // Verifica se está na janela permitida para salvar
-  // Permite: dia de hoje dentro de 30min após a aula (horário + 90min)
-  // Permite também: data futura
-  // Bloqueia: datas passadas fora da janela
   function isEditavel() {
     if (!dataSel) return false
+
     const hoje = todayIso()
-    if (dataSel > hoje) return true   // futura — pode preparar
-    if (dataSel < hoje) return false  // passada — somente leitura
-    // hoje: verifica janela
-    if (!selectedTurma?.horario) return true // sem horário = libera
-    const [h, m] = selectedTurma.horario.split(':').map(Number)
-    const agora = new Date()
-    const agoraMins = agora.getHours() * 60 + agora.getMinutes()
-    const inicioMins = h * 60 + m
-    const fimMins = inicioMins + 90 // aula de 60min + 30min tolerância
-    return agoraMins >= inicioMins - 15 && agoraMins <= fimMins
+
+    // Admin edita sempre
+    if (isAdmin) return true
+
+    // Datas futuras: pode preparar
+    if (dataSel > hoje) return true
+
+    // Janela de 3 dias: hoje (dia 0), ontem (dia -1), anteontem (dia -2)
+    const diffMs = new Date(hoje).getTime() - new Date(dataSel).getTime()
+    const diffDias = Math.round(diffMs / 86400000)
+    return diffDias <= 2
   }
 
   const editavel = isEditavel()
@@ -396,6 +394,34 @@ export default function Presenca() {
                 </div>
               </div>
             )}
+
+            {/* Indicator da janela de edição */}
+            {dataSel && (() => {
+              const hoje = todayIso()
+              const diffDias = dataSel <= hoje
+                ? Math.round((new Date(hoje).getTime() - new Date(dataSel).getTime()) / 86400000)
+                : -1
+              if (editavel && diffDias >= 0 && diffDias <= 2) {
+                const diasRestantes = 2 - diffDias
+                return (
+                  <div className="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-100 dark:border-blue-800 flex items-center gap-2 text-xs text-blue-700 dark:text-blue-400 font-medium">
+                    <Clock size={12} />
+                    {diasRestantes === 0
+                      ? 'Editável somente hoje'
+                      : `Editável por mais ${diasRestantes} dia${diasRestantes > 1 ? 's' : ''} (chamada de ${new Date(dataSel + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })})`
+                    }
+                  </div>
+                )
+              }
+              if (!editavel && dataSel < hoje) {
+                return (
+                  <div className="px-4 py-2 bg-slate-50 dark:bg-navy-900/30 border-b border-slate-100 dark:border-navy-700 flex items-center gap-2 text-xs text-slate-500 font-medium">
+                    🔒 Somente leitura — janela de edição encerrada
+                  </div>
+                )
+              }
+              return null
+            })()}
 
             {alunosLoading ? (
               <div className="p-8 text-center text-sm text-slate-400">Carregando alunos…</div>
