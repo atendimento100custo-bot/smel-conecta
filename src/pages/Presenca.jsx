@@ -1,12 +1,11 @@
 // src/pages/Presenca.jsx
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useSupabaseData } from '../hooks/useSupabaseData'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { logAcao } from '../lib/auditLog'
 import Topbar from '../components/Topbar'
 import Button from '../components/ui/Button'
-import Badge from '../components/ui/Badge'
 import EmptyState from '../components/ui/EmptyState'
 import { Check, X, Save, Users, Clock } from 'lucide-react'
 
