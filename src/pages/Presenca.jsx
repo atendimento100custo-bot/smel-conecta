@@ -417,27 +417,61 @@ export default function Presenca() {
                         )}
                       </div>
                       {ativo ? (
-                        <div className="flex gap-2 flex-shrink-0">
-                          <button
-                            onClick={() => toggle(aluno.id, 'presente')}
-                            className={`inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                              presencaState[aluno.id] === 'presente'
-                                ? 'bg-primary-600 text-white shadow-sm'
-                                : 'bg-slate-100 text-slate-500 hover:bg-primary-50 hover:text-primary-700'
-                            }`}
-                          >
-                            <Check size={12} /> Presente
-                          </button>
-                          <button
-                            onClick={() => toggle(aluno.id, 'falta')}
-                            className={`inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                              presencaState[aluno.id] === 'falta'
-                                ? 'bg-red-500 text-white shadow-sm'
-                                : 'bg-slate-100 text-slate-500 hover:bg-red-50 hover:text-red-600'
-                            }`}
-                          >
-                            <X size={12} /> Falta
-                          </button>
+                        <div className="space-y-1">
+                          <div className="flex gap-1.5 flex-shrink-0 flex-wrap justify-end">
+                            <button
+                              onClick={() => toggle(aluno.id, 'presente')}
+                              disabled={!editavel}
+                              className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                                presencaState[aluno.id] === 'presente'
+                                  ? 'bg-emerald-600 text-white shadow-sm'
+                                  : 'bg-slate-100 text-slate-500 hover:bg-emerald-50 hover:text-emerald-700'
+                              }`}
+                            >
+                              <Check size={11} /> Presente
+                            </button>
+                            <button
+                              onClick={() => toggle(aluno.id, 'falta')}
+                              disabled={!editavel}
+                              className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                                presencaState[aluno.id] === 'falta'
+                                  ? 'bg-red-500 text-white shadow-sm'
+                                  : 'bg-slate-100 text-slate-500 hover:bg-red-50 hover:text-red-600'
+                              }`}
+                            >
+                              <X size={11} /> Falta
+                            </button>
+                            <button
+                              onClick={() => toggle(aluno.id, 'justificado')}
+                              disabled={!editavel}
+                              className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                                presencaState[aluno.id] === 'justificado'
+                                  ? 'bg-amber-500 text-white shadow-sm'
+                                  : 'bg-slate-100 text-slate-500 hover:bg-amber-50 hover:text-amber-600'
+                              }`}
+                            >
+                              📋 Justif.
+                            </button>
+                          </div>
+                          {/* Campo de motivo — expande ao clicar em Justificada */}
+                          {motivoAberto === aluno.id && editavel && (
+                            <div className="mt-1">
+                              <input
+                                type="text"
+                                value={motivoState[aluno.id] ?? ''}
+                                onChange={e => setMotivoState(prev => ({ ...prev, [aluno.id]: e.target.value }))}
+                                placeholder="Motivo (ex: atestado médico)…"
+                                className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-amber-300 bg-amber-50 focus:outline-none focus:ring-1 focus:ring-amber-400 text-amber-900 placeholder-amber-400"
+                                autoFocus
+                              />
+                            </div>
+                          )}
+                          {/* Motivo salvo (leitura) */}
+                          {presencaState[aluno.id] === 'justificado' && motivoAberto !== aluno.id && motivoState[aluno.id] && (
+                            <p className="text-[10px] text-amber-700 mt-0.5 truncate">
+                              📋 {motivoState[aluno.id]}
+                            </p>
+                          )}
                         </div>
                       ) : (
                         <span className="text-[10px] text-slate-400 flex-shrink-0 italic">sem registro</span>
