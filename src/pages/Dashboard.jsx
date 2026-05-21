@@ -47,7 +47,7 @@ export default function Dashboard() {
   const { data: turmas } = useSupabaseData('turmas', 'id,status,modalidade_id,capacidade,faixa,horario,polo_id,modalidades(nome,emoji),polos(nome,tipo,bairro)')
   const { data: presencas } = useSupabaseData('presencas', 'id,data,status,turma_id,aluno_id')
   const { data: atestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id')
-  const { data: polos } = useSupabaseData('polos', 'id,status')
+  const { data: polos } = useSupabaseData('polos', 'id,nome,tipo,bairro,status')
   const { data: modalidades } = useSupabaseData('modalidades', 'id,nome,emoji,status')
 
   const hoje = new Date()
@@ -156,6 +156,26 @@ export default function Dashboard() {
       .sort((a, b) => b.rate - a.rate)
       .slice(0, 5)
   }, [alunos, presencas])
+
+  const topPolos = useMemo(() => {
+    return polos
+      .filter(p => p.status === 'Ativo')
+      .map(p => {
+        const turmasPolo = turmas.filter(t => t.polo_id === p.id && t.status === 'Ativa')
+        const turmaIds = new Set(turmasPolo.map(t => t.id))
+        const alunosPolo = alunos.filter(a => turmaIds.has(a.turma_id) && a.status === 'Ativo').length
+        if (alunosPolo === 0) return null
+        const cap = turmasPolo.reduce((s, t) => s + (t.capacidade || 0), 0)
+        const ocupacao = cap ? Math.round((alunosPolo / cap) * 100) : 0
+        const pp = presencas.filter(p2 => turmaIds.has(p2.turma_id) && p2.data >= inicioMes && p2.data <= fimMes)
+        const freq = pp.length ? Math.round((pp.filter(p2 => p2.status === 'presente' || p2.status === 'justificado').length / pp.length) * 100) : null
+        const label = [p.tipo, p.bairro].filter(Boolean).join(' · ') || p.nome
+        return { id: p.id, label, alunosPolo, turmas: turmasPolo.length, ocupacao, freq }
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.alunosPolo - a.alunosPolo)
+      .slice(0, 5)
+  }, [polos, turmas, alunos, presencas, inicioMes, fimMes])
 
   const porModalidade = useMemo(() => {
     // Soma alunos ativos por modalidade_id via turmas
@@ -298,7 +318,7 @@ export default function Dashboard() {
           {/* Alunos por Modalidade */}
           <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col">
             <p className="text-xs font-bold text-navy-900 dark:text-white mb-3">Alunos por Modalidade</p>
-            {porModalidade.filter(m => m.count > 0).length === 0 ? (
+            {porModalidade.length === 0 ? (
               <div className="min-h-[120px] flex flex-col items-center justify-center gap-2">
                 <div className="text-2xl">🏃</div>
                 <p className="text-xs text-slate-400 dark:text-slate-500 text-center">
@@ -307,7 +327,7 @@ export default function Dashboard() {
               </div>
             ) : (
               <div className="overflow-y-auto max-h-[420px] space-y-3 pr-1">
-                {porModalidade.filter(m => m.count > 0).map(m => (
+                {porModalidade.map(m => (
                   <div key={m.nome}>
                     <div className="flex items-center justify-between text-[10px] text-slate-600 dark:text-slate-300 mb-1.5">
                       <span className="font-medium">{m.emoji} {m.nome}</span>
@@ -382,33 +402,78 @@ export default function Dashboard() {
         </div>{/* fim grid lado-a-lado */}
 
         {/* Top alunos por frequência */}
-        {topAlunos.length > 0 && (
+        {/* Top Alunos | Top Polos — lado a lado */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+          {/* Top 5 Alunos — Maior Frequência */}
           <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
             <p className="text-xs font-bold text-navy-900 dark:text-white mb-3">🏆 Top Alunos — Maior Frequência</p>
-            <div className="space-y-2">
-              {topAlunos.map((a, i) => (
-                <div key={a.id} className="flex items-center gap-3">
-                  <span className="text-[10px] font-bold text-slate-400 w-4 text-right flex-shrink-0">
-                    {i + 1}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between text-[10px] text-slate-600 dark:text-slate-300 mb-1">
-                      <span className="truncate font-medium">{a.nome}</span>
-                      <span className="font-bold ml-2 flex-shrink-0 text-emerald-600">{a.rate}%</span>
+            {topAlunos.length === 0 ? (
+              <div className="min-h-[100px] flex items-center justify-center">
+                <p className="text-xs text-slate-400 dark:text-slate-500 text-center">Registre pelo menos 3 aulas por aluno para aparecer aqui.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {topAlunos.map((a, i) => (
+                  <div key={a.id} className="flex items-center gap-3">
+                    <span className={`text-[10px] font-bold w-4 text-right shrink-0 ${
+                      i === 0 ? 'text-amber-400' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-orange-400' : 'text-slate-300 dark:text-navy-600'
+                    }`}>{i + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between text-[10px] text-slate-600 dark:text-slate-300 mb-1">
+                        <span className="truncate font-medium">{a.nome}</span>
+                        <span className="font-bold ml-2 shrink-0 text-emerald-600">{a.rate}%</span>
+                      </div>
+                      <div className="h-1.5 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden">
+                        <div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full transition-all" style={{ width: `${a.rate}%` }} />
+                      </div>
                     </div>
-                    <div className="h-1.5 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full transition-all"
-                        style={{ width: `${a.rate}%` }}
-                      />
+                    <span className="text-[9px] text-slate-400 shrink-0">{a.total} aulas</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Top 5 Polos — Engajamento e Ocupação */}
+          <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
+            <p className="text-xs font-bold text-navy-900 dark:text-white mb-3">🏟️ Top Polos — Engajamento e Ocupação</p>
+            {topPolos.length === 0 ? (
+              <div className="min-h-[100px] flex items-center justify-center">
+                <p className="text-xs text-slate-400 dark:text-slate-500 text-center">Nenhum polo com alunos ativos ainda.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {topPolos.map((p, i) => (
+                  <div key={p.id} className="flex items-start gap-3">
+                    <span className={`text-[10px] font-bold w-4 text-right shrink-0 mt-0.5 ${
+                      i === 0 ? 'text-amber-400' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-orange-400' : 'text-slate-300 dark:text-navy-600'
+                    }`}>{i + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="text-[10px] font-semibold text-navy-900 dark:text-white truncate leading-snug">{p.label}</span>
+                        <span className="text-[10px] font-bold text-primary-600 shrink-0 ml-2">{p.alunosPolo} alunos</span>
+                      </div>
+                      <div className="h-1.5 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden mb-1.5">
+                        <div className="h-full bg-gradient-to-r from-primary-600 to-primary-400 rounded-full transition-all" style={{ width: `${p.ocupacao}%` }} />
+                      </div>
+                      <div className="flex items-center gap-3 text-[9px] text-slate-400 dark:text-slate-500">
+                        <span>{p.turmas} turma{p.turmas !== 1 ? 's' : ''}</span>
+                        <span>· {p.ocupacao}% ocupação</span>
+                        {p.freq !== null && (
+                          <span className={`font-semibold ${p.freq >= 75 ? 'text-emerald-600' : p.freq >= 50 ? 'text-amber-500' : 'text-red-500'}`}>
+                            · {p.freq}% freq.
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  <span className="text-[9px] text-slate-400 flex-shrink-0">{a.total} aulas</span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
-        )}
+
+        </div>
 
       </div>
     </div>
