@@ -4,7 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import { useSupabaseData } from '../hooks/useSupabaseData'
 import { useTheme } from '../contexts/ThemeContext'
 import Topbar from '../components/Topbar'
-import { subDays, format } from 'date-fns'
+import { subDays, format, startOfMonth, endOfMonth } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
 function KpiCard({ label, value, sub, highlight }) {
@@ -53,6 +53,9 @@ export default function Dashboard() {
   const hoje = new Date()
   const em30 = new Date(); em30.setDate(hoje.getDate() + 30)
   const ha30 = new Date(); ha30.setDate(hoje.getDate() - 30)
+  const inicioMes = format(startOfMonth(hoje), 'yyyy-MM-dd')
+  const fimMes = format(endOfMonth(hoje), 'yyyy-MM-dd')
+  const nomeMes = format(hoje, 'MMMM/yy', { locale: ptBR })
 
   const alunosAtivos = alunos.filter(a => a.status === 'Ativo').length
   const turmasAtivas = turmas.filter(t => t.status === 'Ativa').length
@@ -114,12 +117,12 @@ export default function Dashboard() {
   const hojeTotal = presencasHoje.length
   const hojePct = hojeTotal ? Math.round(((hojePresentes + hojeJustificados) / hojeTotal) * 100) : 0
 
-  // Per-turma attendance rate (all-time)
+  // Per-turma attendance rate (mês atual)
   const turmaFreq = useMemo(() => {
     return turmas
       .filter(t => t.status === 'Ativa')
       .map(t => {
-        const tp = presencas.filter(p => p.turma_id === t.id)
+        const tp = presencas.filter(p => p.turma_id === t.id && p.data >= inicioMes && p.data <= fimMes)
         if (!tp.length) return null
         const rate = Math.round((tp.filter(p => p.status === 'presente' || p.status === 'justificado').length / tp.length) * 100)
         const modNome = t.modalidades?.nome ?? 'Turma'
@@ -322,7 +325,7 @@ export default function Dashboard() {
 
           {/* Frequência por turma */}
           <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col">
-            <p className="text-xs font-bold text-navy-900 dark:text-white mb-3">Frequência por Turma</p>
+            <p className="text-xs font-bold text-navy-900 dark:text-white mb-3">Frequência por Turma — <span className="capitalize">{nomeMes}</span></p>
             {turmaFreq.length === 0 ? (
               <div className="flex-1 min-h-[160px] flex flex-col items-center justify-center gap-2">
                 <span className="text-2xl">📋</span>
