@@ -377,7 +377,7 @@ export default function PoloDetalhe() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { dark } = useTheme()
-  const { isAdmin, isCoordenador, profile } = useAuth()
+  const { isAdmin, isCoordenador, isProfessor, isEstagiario, profile } = useAuth()
   const { offline, pending, addToQueue } = useOfflineQueue()
 
   const [tab, setTab] = useState('geral')
@@ -385,7 +385,7 @@ export default function PoloDetalhe() {
 
   const { data: polos } = useSupabaseData('polos', '*')
   const { data: turmas, reload: reloadTurmas, loading: loadingTurmas } = useSupabaseData('turmas', '*, modalidades(nome,emoji), profiles(id,nome,cargo), polos(nome)')
-  const { data: alunos } = useSupabaseData('alunos', 'id,nome,status,turma_id,data_nasc,data_matricula')
+  const { data: alunos, reload: reloadAlunos } = useSupabaseData('alunos', 'id,nome,status,turma_id,data_nasc,data_matricula,cpf,telefone,telefone_emergencia,email,genero,foto_url')
   const { data: presencas, reload: reloadPresencas } = useSupabaseData('presencas', 'id,data,status,turma_id,aluno_id')
   const { data: atestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id')
   const { data: viagens, reload: reloadViagens } = useSupabaseData('viagens', '*, turmas(*, modalidades(nome,emoji))')
@@ -529,6 +529,22 @@ export default function PoloDetalhe() {
   const [funcError, setFuncError] = useState('')
   const [funcSuccess, setFuncSuccess] = useState(false)
 
+  // Aba Alunos — busca / filtro
+  const [alunosBusca, setAlunosBusca] = useState('')
+  const [alunosFiltroTurma, setAlunosFiltroTurma] = useState('')
+  const [alunosFiltroStatus, setAlunosFiltroStatus] = useState('Ativo')
+
+  // Aba Alunos — editar aluno
+  const [editAlunoOpen, setEditAlunoOpen] = useState(false)
+  const [editAlunoId, setEditAlunoId] = useState(null)
+  const [editAlunoForm, setEditAlunoForm] = useState(EMPTY_ALUNO)
+  const [editAlunoErrors, setEditAlunoErrors] = useState({})
+  const [savingEditAluno, setSavingEditAluno] = useState(false)
+
+  // Aba Alunos — excluir aluno
+  const [deleteAlunoTarget, setDeleteAlunoTarget] = useState(null)
+  const [deletingAluno, setDeletingAluno] = useState(false)
+
   function openNovoFunc() {
     setNovoFuncForm({ ...EMPTY_FUNC, vinculos: [{ polo_id: id, turma_ids: [] }] })
     setFuncError('')
@@ -602,6 +618,13 @@ export default function PoloDetalhe() {
     return atribuicoes.some(a => a.usuario_id === profile?.id && a.turma_id === t.id)
   }, [isAdmin, atribuicoes, profile, id])
 
+  // canDeleteAluno: admin, coordenador global ou coordenador/professor deste polo
+  const canDeleteAluno = useMemo(() => {
+    if (isAdmin || isCoordenador) return true
+    if (!profile || loadingAtribuicoes) return false
+    return atribuicoes.some(a => a.usuario_id === profile.id && a.polo_id === id && (a.cargo === 'coordenador' || a.cargo === 'professor'))
+  }, [isAdmin, isCoordenador, atribuicoes, loadingAtribuicoes, profile, id])
+
   // Acesso ao polo: admin, coordenador global, ou tem qualquer atribuição neste polo, ou professor de alguma turma aqui
   const temAcesso = useMemo(() => {
     if (isAdmin || isCoordenador) return true
@@ -624,6 +647,17 @@ export default function PoloDetalhe() {
   const alunosPolo = useMemo(() => alunos.filter(a => turmaIds.has(a.turma_id)), [alunos, turmaIds])
   const alunoIds = useMemo(() => new Set(alunosPolo.map(a => a.id)), [alunosPolo])
   const presencasPolo = useMemo(() => presencas.filter(p => turmaIds.has(p.turma_id)), [presencas, turmaIds])
+
+  const alunosFiltrados = useMemo(() => {
+    let lista = alunosPolo
+    if (alunosFiltroStatus) lista = lista.filter(a => a.status === alunosFiltroStatus)
+    if (alunosFiltroTurma) lista = lista.filter(a => a.turma_id === alunosFiltroTurma)
+    if (alunosBusca.trim()) {
+      const q = alunosBusca.toLowerCase().trim()
+      lista = lista.filter(a => (a.nome ?? '').toLowerCase().includes(q) || (a.cpf ?? '').includes(q) || (a.telefone ?? '').includes(q))
+    }
+    return lista.sort((a, b) => (a.nome ?? '').localeCompare(b.nome ?? '', 'pt-BR'))
+  }, [alunosPolo, alunosFiltroStatus, alunosFiltroTurma, alunosBusca])
   const atestadosPolo = useMemo(() => atestados.filter(a => alunoIds.has(a.aluno_id)), [atestados, alunoIds])
   const viagensPolo = useMemo(() => viagens.filter(v => v.polo_id === id || turmaIds.has(v.turma_id)), [viagens, id, turmaIds])
 
@@ -860,6 +894,60 @@ export default function PoloDetalhe() {
     reloadViagens()
   }
 
+  function openEditAluno(a) {
+    setEditAlunoId(a.id)
+    setEditAlunoForm({
+      nome: a.nome ?? '',
+      data_nasc: a.data_nasc ?? '',
+      cpf: a.cpf ?? '',
+      telefone: a.telefone ?? '',
+      telefone_emergencia: a.telefone_emergencia ?? '',
+      email: a.email ?? '',
+      status: a.status ?? 'Ativo',
+      turma_id: a.turma_id ?? '',
+      genero: a.genero ?? '',
+      foto_url: a.foto_url ?? '',
+      atestado_validade: '',
+      atestado_foto: '',
+    })
+    setEditAlunoErrors({})
+    setEditAlunoOpen(true)
+  }
+
+  async function salvarEditAluno() {
+    const erros = validateAlunoForm(editAlunoForm)
+    setEditAlunoErrors(erros)
+    if (Object.keys(erros).length > 0) return
+    setSavingEditAluno(true)
+    await supabase.from('alunos').update({
+      nome: editAlunoForm.nome.trim(),
+      data_nasc: editAlunoForm.data_nasc || null,
+      cpf: editAlunoForm.cpf || null,
+      telefone: editAlunoForm.telefone || null,
+      telefone_emergencia: editAlunoForm.telefone_emergencia || null,
+      email: editAlunoForm.email || null,
+      turma_id: editAlunoForm.turma_id || null,
+      status: editAlunoForm.status,
+      genero: editAlunoForm.genero || null,
+      foto_url: editAlunoForm.foto_url || null,
+    }).eq('id', editAlunoId)
+    setSavingEditAluno(false)
+    setEditAlunoOpen(false)
+    reloadAlunos()
+  }
+
+  async function deletarAluno() {
+    if (!deleteAlunoTarget) return
+    setDeletingAluno(true)
+    await supabase.from('presencas').delete().eq('aluno_id', deleteAlunoTarget.id)
+    await supabase.from('atestados').delete().eq('aluno_id', deleteAlunoTarget.id)
+    await supabase.from('aluno_turmas').delete().eq('aluno_id', deleteAlunoTarget.id)
+    await supabase.from('alunos').delete().eq('id', deleteAlunoTarget.id)
+    setDeletingAluno(false)
+    setDeleteAlunoTarget(null)
+    reloadAlunos()
+  }
+
   async function uploadFotoAluno(file) {
     if (!file) return
     setUploadingFotoAluno(true)
@@ -1025,6 +1113,9 @@ export default function PoloDetalhe() {
           <TabBtn active={tab === 'geral'} onClick={() => setTab('geral')}>📊 Visão Geral</TabBtn>
           <TabBtn active={tab === 'operacional'} onClick={() => setTab('operacional')}>🏃 Operacional</TabBtn>
           <TabBtn active={tab === 'viagens'} onClick={() => setTab('viagens')}>🚌 Viagens</TabBtn>
+          {canEditPolo && (
+            <TabBtn active={tab === 'alunos'} onClick={() => setTab('alunos')}>👥 Alunos</TabBtn>
+          )}
         </div>
 
         {/* ─── VISÃO GERAL ──────────────────────────────────────────── */}
@@ -1624,6 +1715,138 @@ export default function PoloDetalhe() {
             )}
           </div>
         )}
+        {/* ─── ABA ALUNOS ──────────────────────────────────────────── */}
+        {tab === 'alunos' && (
+          <div className="space-y-4">
+            {/* Barra de busca + filtros */}
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="relative flex-1">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={alunosBusca}
+                  onChange={e => setAlunosBusca(e.target.value)}
+                  placeholder="Buscar por nome, CPF ou telefone..."
+                  className="w-full pl-8 pr-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-xs bg-white dark:bg-navy-800 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
+              <select
+                value={alunosFiltroTurma}
+                onChange={e => setAlunosFiltroTurma(e.target.value)}
+                className="px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-xs bg-white dark:bg-navy-800 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+              >
+                <option value="">Todas as turmas</option>
+                {turmasPolo.sort((a,b) => (a.modalidades?.nome ?? '').localeCompare(b.modalidades?.nome ?? '', 'pt-BR')).map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.modalidades?.emoji} {t.modalidades?.nome} · {t.dias?.join('/')} {t.horario?.slice(0,5)}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={alunosFiltroStatus}
+                onChange={e => setAlunosFiltroStatus(e.target.value)}
+                className="px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-xs bg-white dark:bg-navy-800 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+              >
+                <option value="">Todos status</option>
+                <option value="Ativo">Ativo</option>
+                <option value="Inativo">Inativo</option>
+                <option value="Pendente">Pendente</option>
+              </select>
+            </div>
+
+            {/* Contagem */}
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium uppercase tracking-widest">
+              {alunosFiltrados.length} aluno{alunosFiltrados.length !== 1 ? 's' : ''} encontrado{alunosFiltrados.length !== 1 ? 's' : ''}
+            </p>
+
+            {/* Lista de alunos */}
+            {alunosFiltrados.length === 0 ? (
+              <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 py-12 flex flex-col items-center gap-3">
+                <div className="text-3xl">👥</div>
+                <p className="text-sm text-slate-400 dark:text-slate-500 text-center">Nenhum aluno encontrado com esses filtros.</p>
+              </div>
+            ) : (
+              <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 overflow-hidden">
+                {/* Header */}
+                <div className="grid grid-cols-12 gap-2 px-4 py-2 bg-slate-50 dark:bg-navy-900 border-b border-slate-100 dark:border-navy-700">
+                  <p className="col-span-5 text-[10px] font-bold uppercase tracking-widest text-slate-400">Aluno</p>
+                  <p className="col-span-4 text-[10px] font-bold uppercase tracking-widest text-slate-400">Turma</p>
+                  <p className="col-span-1 text-[10px] font-bold uppercase tracking-widest text-slate-400 text-center">Status</p>
+                  <p className="col-span-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 text-right">Ações</p>
+                </div>
+                <div className="divide-y divide-slate-100 dark:divide-navy-700">
+                  {alunosFiltrados.map(a => {
+                    const turmaAluno = turmasPolo.find(t => t.id === a.turma_id)
+                    return (
+                      <div key={a.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center hover:bg-slate-50 dark:hover:bg-navy-700/40 transition-colors">
+                        {/* Nome + foto */}
+                        <div className="col-span-5 flex items-center gap-2.5 min-w-0">
+                          {a.foto_url ? (
+                            <img src={a.foto_url} alt={a.nome} className="w-8 h-8 rounded-full object-cover flex-shrink-0 border border-slate-200 dark:border-navy-600" />
+                          ) : (
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-600 to-primary-400 flex items-center justify-center flex-shrink-0">
+                              <span className="text-white text-[10px] font-bold">{a.nome?.charAt(0)?.toUpperCase()}</span>
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-navy-900 dark:text-white truncate">{a.nome}</p>
+                            {a.data_nasc && (
+                              <p className="text-[9px] text-slate-400 dark:text-slate-500">
+                                {new Date().getFullYear() - new Date(a.data_nasc).getFullYear()} anos
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        {/* Turma */}
+                        <div className="col-span-4 min-w-0">
+                          {turmaAluno ? (
+                            <>
+                              <p className="text-[10px] font-semibold text-navy-800 dark:text-slate-200 truncate">
+                                {turmaAluno.modalidades?.emoji} {turmaAluno.modalidades?.nome}
+                              </p>
+                              <p className="text-[9px] text-slate-400 dark:text-slate-500 truncate">
+                                {turmaAluno.dias?.join('/') ?? '—'} · {turmaAluno.horario?.slice(0,5)}
+                              </p>
+                            </>
+                          ) : (
+                            <p className="text-[10px] text-slate-400">Sem turma</p>
+                          )}
+                        </div>
+                        {/* Status badge */}
+                        <div className="col-span-1 flex justify-center">
+                          <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+                            a.status === 'Ativo' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                            : a.status === 'Inativo' ? 'bg-slate-100 text-slate-500 dark:bg-navy-700 dark:text-slate-400'
+                            : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                          }`}>{a.status}</span>
+                        </div>
+                        {/* Ações */}
+                        <div className="col-span-2 flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => openEditAluno(a)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
+                            title="Editar aluno"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          {canDeleteAluno && (
+                            <button
+                              onClick={() => setDeleteAlunoTarget(a)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                              title="Excluir aluno"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Modal de Aula (Presença + Registro) */}
@@ -2088,6 +2311,113 @@ export default function PoloDetalhe() {
         description={`Já existe "${dupWarning?.aluno?.nome}" neste polo${dupWarning?.turma ? ` (${dupWarning.turma.modalidades?.nome ?? 'turma'})` : ''}. Deseja cadastrar mesmo assim?`}
         onConfirm={() => { setDupWarning(null); salvarNovoAluno(true) }}
         onClose={() => setDupWarning(null)}
+      />
+
+      {/* Modal: Editar Aluno (aba Alunos) */}
+      <Modal open={editAlunoOpen} onClose={() => setEditAlunoOpen(false)} title="Editar Aluno" size="lg">
+        <div className="space-y-3">
+          {/* Nome */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Nome *</label>
+            <input type="text" value={editAlunoForm.nome} onChange={e => setEditAlunoForm(f => ({ ...f, nome: e.target.value }))}
+              className={`w-full px-3 py-2 rounded-lg border text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 ${editAlunoErrors.nome ? 'border-red-400' : 'border-slate-200 dark:border-navy-600'}`} />
+            {editAlunoErrors.nome && <p className="text-[10px] text-red-500 mt-1">{editAlunoErrors.nome}</p>}
+          </div>
+
+          {/* Turma */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Turma *</label>
+            <select value={editAlunoForm.turma_id} onChange={e => setEditAlunoForm(f => ({ ...f, turma_id: e.target.value }))}
+              className={`w-full px-3 py-2 rounded-lg border text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 ${editAlunoErrors.turma_id ? 'border-red-400' : 'border-slate-200 dark:border-navy-600'}`}>
+              <option value="">Selecione uma turma...</option>
+              {turmasPolo.filter(t => t.status === 'Ativa').sort((a,b) => (a.modalidades?.nome ?? '').localeCompare(b.modalidades?.nome ?? '', 'pt-BR')).map(t => (
+                <option key={t.id} value={t.id}>{t.modalidades?.emoji} {t.modalidades?.nome} · {t.dias?.join('/')} {t.horario?.slice(0,5)} ({t.faixa})</option>
+              ))}
+            </select>
+            {editAlunoErrors.turma_id && <p className="text-[10px] text-red-500 mt-1">{editAlunoErrors.turma_id}</p>}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {/* Data de nascimento */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Data de Nascimento</label>
+              <input type="date" value={editAlunoForm.data_nasc} onChange={e => setEditAlunoForm(f => ({ ...f, data_nasc: e.target.value }))}
+                className={`w-full px-3 py-2 rounded-lg border text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 ${editAlunoErrors.data_nasc ? 'border-red-400' : 'border-slate-200 dark:border-navy-600'}`} />
+              {editAlunoErrors.data_nasc && <p className="text-[10px] text-red-500 mt-1">{editAlunoErrors.data_nasc}</p>}
+            </div>
+            {/* Gênero */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Gênero</label>
+              <select value={editAlunoForm.genero} onChange={e => setEditAlunoForm(f => ({ ...f, genero: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+                <option value="">Não informado</option>
+                <option value="Masculino">Masculino</option>
+                <option value="Feminino">Feminino</option>
+                <option value="Outro">Outro</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {/* CPF */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">CPF</label>
+              <input type="text" value={editAlunoForm.cpf} onChange={e => setEditAlunoForm(f => ({ ...f, cpf: e.target.value }))} placeholder="000.000.000-00"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            {/* Status */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Status</label>
+              <select value={editAlunoForm.status} onChange={e => setEditAlunoForm(f => ({ ...f, status: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+                <option>Ativo</option>
+                <option>Inativo</option>
+                <option>Pendente</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {/* Telefone */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Telefone</label>
+              <input type="tel" value={editAlunoForm.telefone} onChange={e => setEditAlunoForm(f => ({ ...f, telefone: e.target.value }))} placeholder="(21) 9 9999-9999"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            {/* Telefone Emergência */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Telefone Emergência</label>
+              <input type="tel" value={editAlunoForm.telefone_emergencia} onChange={e => setEditAlunoForm(f => ({ ...f, telefone_emergencia: e.target.value }))} placeholder="(21) 9 9999-9999"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+          </div>
+
+          {/* E-mail */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">E-mail</label>
+            <input type="email" value={editAlunoForm.email} onChange={e => setEditAlunoForm(f => ({ ...f, email: e.target.value }))} placeholder="aluno@email.com"
+              className={`w-full px-3 py-2 rounded-lg border text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 ${editAlunoErrors.email ? 'border-red-400' : 'border-slate-200 dark:border-navy-600'}`} />
+            {editAlunoErrors.email && <p className="text-[10px] text-red-500 mt-1">{editAlunoErrors.email}</p>}
+          </div>
+
+          <div className="flex gap-2 justify-end pt-2">
+            <Button variant="secondary" size="sm" onClick={() => setEditAlunoOpen(false)}>Cancelar</Button>
+            <Button size="sm" onClick={salvarEditAluno} disabled={savingEditAluno}>
+              <Save size={13} /> {savingEditAluno ? 'Salvando...' : 'Salvar'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Confirm: Excluir Aluno */}
+      <ConfirmDialog
+        open={!!deleteAlunoTarget}
+        title="Excluir aluno"
+        message={`Tem certeza que deseja excluir ${deleteAlunoTarget?.nome}? Todas as presenças e atestados serão removidos permanentemente.`}
+        confirmLabel={deletingAluno ? 'Excluindo...' : 'Excluir'}
+        onConfirm={deletarAluno}
+        onCancel={() => setDeleteAlunoTarget(null)}
+        danger
       />
     </div>
   )
