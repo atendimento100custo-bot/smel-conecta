@@ -7,6 +7,68 @@ import Topbar from '../components/Topbar'
 import { subDays, format, startOfMonth, endOfMonth } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
+function GaugePresenca({ pct, presentes, justificados, faltas, total, dark }) {
+  const R = 66, sw = 13, cx = 92, cy = 80
+  const vw = 184, vh = 94
+
+  const safePct = Math.min(pct, 99.99)
+  const endX = cx - R * Math.cos(Math.PI * safePct / 100)
+  const endY = cy - R * Math.sin(Math.PI * safePct / 100)
+  const bgPath = `M ${cx - R} ${cy} A ${R} ${R} 0 0 0 ${cx + R} ${cy}`
+  const fgPath = `M ${cx - R} ${cy} A ${R} ${R} 0 0 0 ${endX.toFixed(2)} ${endY.toFixed(2)}`
+  const pctColor = pct >= 75 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#f87171'
+  const bgColor = dark ? '#1e2d42' : '#f1f5f9'
+
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center gap-3">
+      <svg width={vw} height={vh} viewBox={`0 0 ${vw} ${vh}`} style={{ overflow: 'visible' }}>
+        <defs>
+          <linearGradient id="gaugeGrad" gradientUnits="userSpaceOnUse"
+            x1={cx - R} y1="0" x2={cx + R} y2="0">
+            <stop offset="0%" stopColor="#f87171" />
+            <stop offset="48%" stopColor="#f59e0b" />
+            <stop offset="100%" stopColor="#10b981" />
+          </linearGradient>
+        </defs>
+        {/* Track */}
+        <path d={bgPath} fill="none" stroke={bgColor} strokeWidth={sw} strokeLinecap="round" />
+        {/* Filled arc */}
+        {safePct > 0.5 && (
+          <path d={fgPath} fill="none" stroke="url(#gaugeGrad)" strokeWidth={sw} strokeLinecap="round" />
+        )}
+        {/* Percentage */}
+        <text x={cx} y={cy - 20} textAnchor="middle"
+          fill={pctColor} fontSize="30" fontWeight="800"
+          fontFamily="system-ui,-apple-system,sans-serif">{pct}%</text>
+        <text x={cx} y={cy - 5} textAnchor="middle"
+          fill={dark ? '#64748b' : '#94a3b8'} fontSize="9"
+          fontFamily="system-ui,-apple-system,sans-serif">de presença hoje</text>
+      </svg>
+
+      <div className="flex items-center gap-5 pb-1">
+        <div className="text-center">
+          <p className="text-2xl font-extrabold text-emerald-500 leading-none">{presentes}</p>
+          <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-1">presentes</p>
+        </div>
+        {justificados > 0 && (
+          <div className="text-center">
+            <p className="text-2xl font-extrabold text-amber-400 leading-none">{justificados}</p>
+            <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-1">justificados</p>
+          </div>
+        )}
+        <div className="text-center">
+          <p className="text-2xl font-extrabold text-red-400 leading-none">{faltas}</p>
+          <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-1">faltas</p>
+        </div>
+        <div className="text-center border-l border-slate-100 dark:border-navy-700 pl-5">
+          <p className="text-xl font-bold text-slate-400 dark:text-slate-500 leading-none">{total}</p>
+          <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-1">registros</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function KpiCard({ label, value, sub, highlight }) {
   return (
     <div className={`rounded-xl border p-4 ${
@@ -289,9 +351,9 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Presença Hoje */}
+          {/* Presença Hoje — Gauge */}
           <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col">
-            <p className="text-xs font-bold text-navy-900 dark:text-white mb-3">Presença — Hoje</p>
+            <p className="text-xs font-bold text-navy-900 dark:text-white mb-1">Presença — Hoje</p>
             {hojeTotal === 0 ? (
               <div className="flex-1 min-h-[160px] flex flex-col items-center justify-center gap-2">
                 <span className="text-2xl">📅</span>
@@ -300,26 +362,14 @@ export default function Dashboard() {
                 </p>
               </div>
             ) : (
-              <div className="flex-1 flex flex-col justify-center">
-                <div className="flex items-end gap-5 mb-4">
-                  <div>
-                    <p className="text-3xl font-extrabold text-emerald-600 leading-none">{hojePresentes}</p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">presentes</p>
-                  </div>
-                  <div>
-                    <p className="text-3xl font-extrabold text-red-400 leading-none">{hojeFaltas}</p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">faltas</p>
-                  </div>
-                  <div className="ml-auto text-right">
-                    <p className="text-2xl font-extrabold text-navy-900 dark:text-white leading-none">{hojePct}%</p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">presença</p>
-                  </div>
-                </div>
-                <div className="h-2 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden">
-                  <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${hojePct}%` }} />
-                </div>
-                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5">{hojeTotal} registros hoje</p>
-              </div>
+              <GaugePresenca
+                pct={hojePct}
+                presentes={hojePresentes}
+                justificados={hojeJustificados}
+                faltas={hojeFaltas}
+                total={hojeTotal}
+                dark={dark}
+              />
             )}
           </div>
 
