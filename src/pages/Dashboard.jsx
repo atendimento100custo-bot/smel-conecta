@@ -7,63 +7,40 @@ import Topbar from '../components/Topbar'
 import { subDays, format, startOfMonth, endOfMonth } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
-function GaugePresenca({ pct, presentes, justificados, faltas, total, dark }) {
-  const R = 66, sw = 13, cx = 92, cy = 80
-  const vw = 184, vh = 94
+function PresencaHoje({ pct, presentes, justificados, faltas, total }) {
+  const pctColor = pct >= 75 ? 'text-emerald-500' : pct >= 50 ? 'text-amber-400' : 'text-red-400'
+  const barColor = pct >= 75 ? 'bg-emerald-500' : pct >= 50 ? 'bg-amber-400' : 'bg-red-400'
 
-  const safePct = Math.min(pct, 99.99)
-  const endX = cx - R * Math.cos(Math.PI * safePct / 100)
-  const endY = cy - R * Math.sin(Math.PI * safePct / 100)
-  const bgPath = `M ${cx - R} ${cy} A ${R} ${R} 0 0 0 ${cx + R} ${cy}`
-  const fgPath = `M ${cx - R} ${cy} A ${R} ${R} 0 0 0 ${endX.toFixed(2)} ${endY.toFixed(2)}`
-  const pctColor = pct >= 75 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#f87171'
-  const bgColor = dark ? '#1e2d42' : '#f1f5f9'
+  const cols = [
+    { label: 'Presentes', value: presentes, color: 'text-emerald-500', bar: 'bg-emerald-500' },
+    { label: 'Justificados', value: justificados, color: 'text-amber-400', bar: 'bg-amber-400' },
+    { label: 'Faltas', value: faltas, color: 'text-red-400', bar: 'bg-red-400' },
+  ]
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center gap-3">
-      <svg width={vw} height={vh} viewBox={`0 0 ${vw} ${vh}`} style={{ overflow: 'visible' }}>
-        <defs>
-          <linearGradient id="gaugeGrad" gradientUnits="userSpaceOnUse"
-            x1={cx - R} y1="0" x2={cx + R} y2="0">
-            <stop offset="0%" stopColor="#f87171" />
-            <stop offset="48%" stopColor="#f59e0b" />
-            <stop offset="100%" stopColor="#10b981" />
-          </linearGradient>
-        </defs>
-        {/* Track */}
-        <path d={bgPath} fill="none" stroke={bgColor} strokeWidth={sw} strokeLinecap="round" />
-        {/* Filled arc */}
-        {safePct > 0.5 && (
-          <path d={fgPath} fill="none" stroke="url(#gaugeGrad)" strokeWidth={sw} strokeLinecap="round" />
-        )}
-        {/* Percentage */}
-        <text x={cx} y={cy - 20} textAnchor="middle"
-          fill={pctColor} fontSize="30" fontWeight="800"
-          fontFamily="system-ui,-apple-system,sans-serif">{pct}%</text>
-        <text x={cx} y={cy - 5} textAnchor="middle"
-          fill={dark ? '#64748b' : '#94a3b8'} fontSize="9"
-          fontFamily="system-ui,-apple-system,sans-serif">de presença hoje</text>
-      </svg>
+    <div className="flex-1 flex flex-col justify-center gap-4">
+      {/* Percentual gigante */}
+      <div className="text-center">
+        <p className={`text-6xl font-black leading-none tracking-tight ${pctColor}`}>{pct}%</p>
+        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5 uppercase tracking-widest font-semibold">
+          de presença hoje · {total} registros
+        </p>
+      </div>
 
-      <div className="flex items-center gap-5 pb-1">
-        <div className="text-center">
-          <p className="text-2xl font-extrabold text-emerald-500 leading-none">{presentes}</p>
-          <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-1">presentes</p>
-        </div>
-        {justificados > 0 && (
-          <div className="text-center">
-            <p className="text-2xl font-extrabold text-amber-400 leading-none">{justificados}</p>
-            <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-1">justificados</p>
+      {/* 3 colunas */}
+      <div className="grid grid-cols-3 gap-2">
+        {cols.map(c => (
+          <div key={c.label} className="flex flex-col items-center gap-1.5">
+            <p className={`text-2xl font-extrabold leading-none ${c.color}`}>{c.value}</p>
+            <div className="w-full h-1.5 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${c.bar}`}
+                style={{ width: total ? `${(c.value / total) * 100}%` : '0%' }}
+              />
+            </div>
+            <p className="text-[9px] text-slate-400 dark:text-slate-500 font-medium">{c.label}</p>
           </div>
-        )}
-        <div className="text-center">
-          <p className="text-2xl font-extrabold text-red-400 leading-none">{faltas}</p>
-          <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-1">faltas</p>
-        </div>
-        <div className="text-center border-l border-slate-100 dark:border-navy-700 pl-5">
-          <p className="text-xl font-bold text-slate-400 dark:text-slate-500 leading-none">{total}</p>
-          <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-1">registros</p>
-        </div>
+        ))}
       </div>
     </div>
   )
@@ -362,13 +339,12 @@ export default function Dashboard() {
                 </p>
               </div>
             ) : (
-              <GaugePresenca
+              <PresencaHoje
                 pct={hojePct}
                 presentes={hojePresentes}
                 justificados={hojeJustificados}
                 faltas={hojeFaltas}
                 total={hojeTotal}
-                dark={dark}
               />
             )}
           </div>
