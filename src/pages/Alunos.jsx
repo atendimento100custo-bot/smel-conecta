@@ -61,10 +61,10 @@ function calcFaixa(dataNasc) {
 }
 
 export default function Alunos() {
-  const { isAdmin, isCoordenador, isProfessor, profile } = useAuth()
+  const { isAdmin, isCoordenador, isProfessor, isEstagiario, profile } = useAuth()
   const { dark } = useTheme()
   const { offline, pending, addToQueue } = useOfflineQueue()
-  const canEdit = isAdmin || isCoordenador || isProfessor
+  const canEdit = isAdmin || isCoordenador || isProfessor || isEstagiario
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const turmaIdFilter = searchParams.get('turma_id')
@@ -118,7 +118,7 @@ export default function Alunos() {
 
   // ─── filtro por papel + drill-down ───────────────────────────
   const alunosFiltrados = (() => {
-    let list = (isAdmin || isCoordenador)
+    let list = (isAdmin || isCoordenador || isEstagiario)
       ? alunos
       : alunos.filter(a => {
           const turma = turmas.find(t => t.id === a.turma_id)
@@ -572,7 +572,7 @@ export default function Alunos() {
                           >
                             <Pencil size={13} />
                           </button>
-                          {(isAdmin || isCoordenador) && (
+                          {(isAdmin || isCoordenador || isProfessor) && (
                             <button
                               onClick={() => setDeletando(a)}
                               className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"
