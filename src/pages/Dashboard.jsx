@@ -292,94 +292,94 @@ export default function Dashboard() {
 
         </div>
 
-        {/* Row: Alunos por Modalidade (meia largura) */}
-        <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
-          <p className="text-xs font-bold text-navy-900 dark:text-white mb-3">Alunos por Modalidade</p>
-          {porModalidade.length === 0 ? (
-            <div className="min-h-[120px] flex flex-col items-center justify-center gap-2">
-              <div className="text-2xl">🏃</div>
-              <p className="text-xs text-slate-400 dark:text-slate-500 text-center">
-                Nenhuma turma com alunos ainda.<br />Cadastre turmas e alunos para ver aqui.
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3">
-              {porModalidade.map(m => (
-                <div key={m.nome}>
-                  <div className="flex justify-between text-[10px] text-slate-600 dark:text-slate-300 mb-1.5">
-                    <span>{m.emoji} {m.nome}</span>
-                    <span className="font-bold">{m.count}</span>
-                  </div>
-                  <div className="h-2 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-primary-600 to-primary-400 rounded-full transition-all"
-                      style={{ width: alunosAtivos ? `${(m.count / alunosAtivos) * 100}%` : '0%' }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        {/* Row: Alunos por Modalidade | Ranking de Frequência por Turma — lado a lado */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
 
-        {/* Ranking de Frequência por Turma — full-width, scrollável */}
-        <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-bold text-navy-900 dark:text-white">
-              📋 Ranking de Frequência por Turma — <span className="capitalize">{nomeMes}</span>
-            </p>
-            {turmaFreq.length > 0 && (
-              <span className="text-[10px] text-slate-400 dark:text-slate-500">{turmaFreq.length} turma{turmaFreq.length !== 1 ? 's' : ''} com chamada registrada</span>
-            )}
-          </div>
-          {turmaFreq.length === 0 ? (
-            <div className="min-h-[100px] flex flex-col items-center justify-center gap-2">
-              <span className="text-2xl">📋</span>
-              <p className="text-xs text-slate-400 dark:text-slate-500 text-center">
-                Nenhuma chamada registrada este mês ainda.
-              </p>
-            </div>
-          ) : (
-            <>
-              {/* Cabeçalho */}
-              <div className="flex items-center gap-2 px-2 pb-1.5 border-b border-slate-100 dark:border-navy-700">
-                <span className="w-5 shrink-0 text-[9px] font-bold uppercase tracking-widest text-slate-400 text-right">#</span>
-                <span className="flex-1 text-[9px] font-bold uppercase tracking-widest text-slate-400">Turma · Polo · Horário</span>
-                <span className="w-24 shrink-0 text-[9px] font-bold uppercase tracking-widest text-slate-400 text-right">Freq.</span>
+          {/* Alunos por Modalidade */}
+          <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col">
+            <p className="text-xs font-bold text-navy-900 dark:text-white mb-3">Alunos por Modalidade</p>
+            {porModalidade.filter(m => m.count > 0).length === 0 ? (
+              <div className="min-h-[120px] flex flex-col items-center justify-center gap-2">
+                <div className="text-2xl">🏃</div>
+                <p className="text-xs text-slate-400 dark:text-slate-500 text-center">
+                  Nenhuma turma com alunos ainda.
+                </p>
               </div>
-              {/* Lista scrollável */}
-              <div className="overflow-y-auto max-h-[420px]">
-                {turmaFreq.map((t, i) => (
-                  <div key={t.id} className="flex items-center gap-2 px-2 py-2 border-b border-slate-50 dark:border-navy-700/40 hover:bg-slate-50/60 dark:hover:bg-navy-700/30 transition-colors">
-                    {/* Rank */}
-                    <span className={`w-5 shrink-0 text-[10px] font-bold text-right ${
-                      i === 0 ? 'text-amber-400' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-orange-400' : 'text-slate-300 dark:text-navy-600'
-                    }`}>{i + 1}</span>
-                    {/* Emoji */}
-                    <span className="text-base shrink-0 leading-none">{t.emoji}</span>
-                    {/* Info — ocupa todo o espaço disponível */}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[11px] font-semibold text-navy-900 dark:text-white truncate leading-snug">{t.label}</p>
-                      <p className="text-[9px] text-slate-400 dark:text-slate-500 truncate leading-snug">
-                        {t.polo}{t.horario !== '—' ? ` · ${t.horario}` : ''} · {t.total} aula{t.total !== 1 ? 's' : ''}
-                      </p>
+            ) : (
+              <div className="overflow-y-auto max-h-[420px] space-y-3 pr-1">
+                {porModalidade.filter(m => m.count > 0).map(m => (
+                  <div key={m.nome}>
+                    <div className="flex items-center justify-between text-[10px] text-slate-600 dark:text-slate-300 mb-1.5">
+                      <span className="font-medium">{m.emoji} {m.nome}</span>
+                      <span className="font-bold text-navy-900 dark:text-white ml-2 shrink-0">{m.count}</span>
                     </div>
-                    {/* Barra + % */}
-                    <div className="shrink-0 flex items-center gap-2 w-24">
-                      <div className="flex-1 h-1.5 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full ${t.rate >= 75 ? 'bg-emerald-500' : t.rate >= 50 ? 'bg-amber-400' : 'bg-red-400'}`}
-                          style={{ width: `${t.rate}%` }} />
-                      </div>
-                      <span className={`w-9 text-right text-[11px] font-extrabold shrink-0 ${
-                        t.rate >= 75 ? 'text-emerald-600' : t.rate >= 50 ? 'text-amber-500' : 'text-red-500'
-                      }`}>{t.rate}%</span>
+                    <div className="h-1.5 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-primary-600 to-primary-400 rounded-full transition-all"
+                        style={{ width: alunosAtivos ? `${(m.count / alunosAtivos) * 100}%` : '0%' }}
+                      />
                     </div>
                   </div>
                 ))}
               </div>
+            )}
+          </div>
+
+          {/* Ranking de Frequência por Turma */}
+          <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-bold text-navy-900 dark:text-white">
+                📋 Freq. por Turma — <span className="capitalize">{nomeMes}</span>
+              </p>
+              {turmaFreq.length > 0 && (
+                <span className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0 ml-2">{turmaFreq.length} turma{turmaFreq.length !== 1 ? 's' : ''}</span>
+              )}
+            </div>
+            {turmaFreq.length === 0 ? (
+              <div className="min-h-[120px] flex flex-col items-center justify-center gap-2">
+                <span className="text-2xl">📋</span>
+                <p className="text-xs text-slate-400 dark:text-slate-500 text-center">
+                  Nenhuma chamada registrada este mês ainda.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Cabeçalho */}
+                <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100 dark:border-navy-700 mb-0.5">
+                  <span className="w-5 shrink-0 text-[9px] font-bold uppercase tracking-widest text-slate-400 text-right">#</span>
+                  <span className="flex-1 text-[9px] font-bold uppercase tracking-widest text-slate-400">Turma · Polo · Horário</span>
+                  <span className="w-20 shrink-0 text-[9px] font-bold uppercase tracking-widest text-slate-400 text-right">Freq.</span>
+                </div>
+                {/* Lista scrollável */}
+                <div className="overflow-y-auto max-h-[420px]">
+                  {turmaFreq.map((t, i) => (
+                    <div key={t.id} className="flex items-center gap-2 py-2 border-b border-slate-50 dark:border-navy-700/40 hover:bg-slate-50/60 dark:hover:bg-navy-700/30 transition-colors rounded-sm">
+                      <span className={`w-5 shrink-0 text-[10px] font-bold text-right ${
+                        i === 0 ? 'text-amber-400' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-orange-400' : 'text-slate-300 dark:text-navy-600'
+                      }`}>{i + 1}</span>
+                      <span className="text-base shrink-0 leading-none">{t.emoji}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[11px] font-semibold text-navy-900 dark:text-white truncate leading-snug">{t.label}</p>
+                        <p className="text-[9px] text-slate-400 dark:text-slate-500 truncate leading-snug">
+                          {t.polo}{t.horario !== '—' ? ` · ${t.horario}` : ''} · {t.total} aula{t.total !== 1 ? 's' : ''}
+                        </p>
+                      </div>
+                      <div className="shrink-0 flex items-center gap-1.5 w-20">
+                        <div className="flex-1 h-1.5 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${t.rate >= 75 ? 'bg-emerald-500' : t.rate >= 50 ? 'bg-amber-400' : 'bg-red-400'}`}
+                            style={{ width: `${t.rate}%` }} />
+                        </div>
+                        <span className={`w-9 text-right text-[11px] font-extrabold shrink-0 ${
+                          t.rate >= 75 ? 'text-emerald-600' : t.rate >= 50 ? 'text-amber-500' : 'text-red-500'
+                        }`}>{t.rate}%</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
             </>
           )}
         </div>
+        </div>{/* fim grid lado-a-lado */}
 
         {/* Top alunos por frequência */}
         {topAlunos.length > 0 && (
