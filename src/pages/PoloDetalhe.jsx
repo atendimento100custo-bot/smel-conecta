@@ -95,7 +95,8 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
   // Janela de presença: disponível 10min antes do início até 30min após o término
   const [h, m] = (turma?.horario || '00:00').split(':').map(Number)
   const startMins = h * 60 + m
-  const endMins = startMins + 90
+  const duracaoMin = turma?.duracao_min || 60
+  const endMins = startMins + duracaoMin
   const nowMins = new Date().getHours() * 60 + new Date().getMinutes()
   const notYetAvailable = nowMins < startMins - 10
   const isLocked = nowMins > endMins + 30
@@ -119,11 +120,12 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
   useEffect(() => {
     if (!turma || !open) return
     // Init presença (use existing if any, else default all absent)
+    // Preserva status: 'presente' | 'justificado' | 'falta' (false = falta)
     const existentes = presencas.filter(p => p.turma_id === turma.id && p.data === dataHoje)
     const map = {}
     alunosTurma.forEach(a => {
       const ex = existentes.find(p => p.aluno_id === a.id)
-      map[a.id] = ex ? (ex.status === 'presente') : false
+      map[a.id] = ex ? ex.status : false
     })
     setPresencaMap(map)
 
@@ -144,16 +146,22 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
     const latestIds = {}
     ;(existentes ?? []).forEach(r => { latestIds[r.aluno_id] = r.id })
 
+    // Converte o valor do map (string|boolean) para o status correto
+    const toStatus = (val) => {
+      if (val === 'presente' || val === 'justificado') return val
+      return val ? 'presente' : 'falta'
+    }
     const toUpdate = [], toInsert = []
-    Object.entries(presencaMap).forEach(([aluno_id, presente]) => {
+    Object.entries(presencaMap).forEach(([aluno_id, val]) => {
+      const status = toStatus(val)
       if (latestIds[aluno_id]) {
-        toUpdate.push({ id: latestIds[aluno_id], presente })
+        toUpdate.push({ id: latestIds[aluno_id], status })
       } else {
-        toInsert.push({ turma_id: turma.id, aluno_id, data: dataHoje, status: presente ? 'presente' : 'falta' })
+        toInsert.push({ turma_id: turma.id, aluno_id, data: dataHoje, status })
       }
     })
     await Promise.all([
-      ...toUpdate.map(r => supabase.from('presencas').update({ status: r.presente ? 'presente' : 'falta' }).eq('id', r.id)),
+      ...toUpdate.map(r => supabase.from('presencas').update({ status: r.status }).eq('id', r.id)),
       toInsert.length ? supabase.from('presencas').insert(toInsert) : Promise.resolve(),
     ])
   }
@@ -199,7 +207,8 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
     e.target.value = ''
   }
 
-  const presentes = Object.values(presencaMap).filter(Boolean).length
+  const presentes = Object.values(presencaMap).filter(v => v === 'presente' || v === true).length
+  const justificados = Object.values(presencaMap).filter(v => v === 'justificado').length
   const total = alunosTurma.length
 
   if (!turma) return null
@@ -284,7 +293,7 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
             <div className="flex-1 h-px bg-slate-200 dark:bg-navy-600" />
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">Lista de Presença</span>
-              <span className="text-[10px] font-semibold text-primary-600">{presentes} presentes / {total} total</span>
+              <span className="text-[10px] font-semibold text-primary-600">{presentes + justificados} freq. ({presentes}P {justificados > 0 ? `${justificados}J ` : ''}/ {total})</span>
             </div>
             <div className="flex-1 h-px bg-slate-200 dark:bg-navy-600" />
           </div>
@@ -326,28 +335,40 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
                     </div>
                   )
                 }
-                return (
-                  <button
-                    key={a.id}
-                    onClick={() => setPresencaMap(m => ({ ...m, [a.id]: !m[a.id] }))}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
-                      presencaMap[a.id]
-                        ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-700'
-                        : 'bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800'
-                    }`}
-                  >
-                    {presencaMap[a.id]
-                      ? <CheckCircle2 size={16} className="text-primary-600 flex-shrink-0" />
-                      : <Circle size={16} className="text-red-400 flex-shrink-0" />}
-                    <div className="w-6 h-6 rounded-full bg-primary-600 flex items-center justify-center flex-shrink-0">
-                      <span className="text-white text-[9px] font-bold">{a.nome?.charAt(0)}</span>
-                    </div>
-                    <span className="text-xs font-medium text-navy-900 dark:text-white text-left">{a.nome}</span>
-                    <span className={`ml-auto text-[10px] font-semibold ${presencaMap[a.id] ? 'text-primary-600' : 'text-red-400'}`}>
-                      {presencaMap[a.id] ? 'Presente' : 'Falta'}
-                    </span>
-                  </button>
-                )
+                {(() => {
+                  const val = presencaMap[a.id]
+                  const isPresente = val === 'presente' || val === true
+                  const isJustificado = val === 'justificado'
+                  const isFalta = !val
+                  // Toggle: falta → presente → falta (justificado mantém até clicar para ir a presente)
+                  const nextVal = isPresente ? false : 'presente'
+                  return (
+                    <button
+                      key={a.id}
+                      onClick={() => setPresencaMap(m => ({ ...m, [a.id]: nextVal }))}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                        isJustificado
+                          ? 'bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-700'
+                          : isPresente
+                          ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-700'
+                          : 'bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800'
+                      }`}
+                    >
+                      {isJustificado
+                        ? <CheckCircle2 size={16} className="text-amber-500 flex-shrink-0" />
+                        : isPresente
+                        ? <CheckCircle2 size={16} className="text-primary-600 flex-shrink-0" />
+                        : <Circle size={16} className="text-red-400 flex-shrink-0" />}
+                      <div className="w-6 h-6 rounded-full bg-primary-600 flex items-center justify-center flex-shrink-0">
+                        <span className="text-white text-[9px] font-bold">{a.nome?.charAt(0)}</span>
+                      </div>
+                      <span className="text-xs font-medium text-navy-900 dark:text-white text-left">{a.nome}</span>
+                      <span className={`ml-auto text-[10px] font-semibold ${isJustificado ? 'text-amber-500' : isPresente ? 'text-primary-600' : 'text-red-400'}`}>
+                        {isJustificado ? 'Justificado' : isPresente ? 'Presente' : 'Falta'}
+                      </span>
+                    </button>
+                  )
+                })()}
               })}
             </div>
           )}
@@ -2351,8 +2372,8 @@ export default function PoloDetalhe() {
               <select value={editAlunoForm.genero} onChange={e => setEditAlunoForm(f => ({ ...f, genero: e.target.value }))}
                 className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500">
                 <option value="">Não informado</option>
-                <option value="Masculino">Masculino</option>
-                <option value="Feminino">Feminino</option>
+                <option value="M">Masculino</option>
+                <option value="F">Feminino</option>
                 <option value="Outro">Outro</option>
               </select>
             </div>
