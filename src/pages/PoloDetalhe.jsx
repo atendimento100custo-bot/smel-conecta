@@ -712,12 +712,23 @@ export default function PoloDetalhe() {
   const diaHoje = hoje.getDay()
   const aulasHoje = turmasPolo.filter(t => t.dias?.some(d => DIAS_JS[d] === diaHoje))
   const agoraMins = hoje.getHours() * 60 + hoje.getMinutes()
-  const aulaAgora = aulasHoje.find(t => {
-    if (!t.horario) return false
+  // Prioridade: turma em andamento > pós-janela; empate → a que começou mais recente
+  const aulaAgora = aulasHoje.reduce((best, t) => {
+    if (!t.horario) return best
     const [h, m] = t.horario.split(':').map(Number)
     const tMins = h * 60 + m
-    return agoraMins >= tMins - 30 && agoraMins <= tMins + 90
-  })
+    const dur = t.duracao_min || 60
+    if (agoraMins < tMins - 30 || agoraMins > tMins + dur + 30) return best
+    if (!best) return t
+    const [bh, bm] = (best.horario || '00:00').split(':').map(Number)
+    const bMins = bh * 60 + bm
+    const bDur = best.duracao_min || 60
+    const tEmAula = agoraMins >= tMins && agoraMins <= tMins + dur
+    const bEmAula = agoraMins >= bMins && agoraMins <= bMins + bDur
+    if (tEmAula && !bEmAula) return t   // t está em aula, best não → t vence
+    if (!tEmAula && bEmAula) return best // best está em aula, t não → best vence
+    return tMins > bMins ? t : best     // ambas iguais → mais recente vence
+  }, null)
 
   // Turmas Melhor Idade
   const turmasMelhorIdade = turmasPolo.filter(t => t.faixa === 'Melhor Idade')
@@ -1225,7 +1236,12 @@ export default function PoloDetalhe() {
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {aulasHoje.map(t => {
-                    const isAgora = t.id === aulaAgora?.id
+                    const isAgora = (() => {
+                      if (!t.horario) return false
+                      const [th, tm] = t.horario.split(':').map(Number)
+                      const tM = th * 60 + tm
+                      return agoraMins >= tM - 30 && agoraMins <= tM + (t.duracao_min || 60) + 30
+                    })()
                     const alunosTurma = alunos.filter(a => a.turma_id === t.id && a.status === 'Ativo').length
                     const presencaHoje = presencas.filter(p => p.turma_id === t.id && p.data === new Date().toISOString().split('T')[0])
                     const jaRegistrou = presencaHoje.length > 0
