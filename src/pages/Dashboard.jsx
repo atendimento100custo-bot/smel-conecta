@@ -44,7 +44,7 @@ function ChartTooltip({ active, payload, label }) {
 export default function Dashboard() {
   const { dark } = useTheme()
   const { data: alunos } = useSupabaseData('alunos', 'id,nome,status,turma_id,data_nasc,data_matricula')
-  const { data: turmas } = useSupabaseData('turmas', 'id,status,modalidade_id,capacidade,faixa,modalidades(nome,emoji)')
+  const { data: turmas } = useSupabaseData('turmas', 'id,status,modalidade_id,capacidade,faixa,horario,polo_id,modalidades(nome,emoji),polos(nome)')
   const { data: presencas } = useSupabaseData('presencas', 'id,data,status,turma_id,aluno_id')
   const { data: atestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id')
   const { data: polos } = useSupabaseData('polos', 'id,status')
@@ -131,13 +131,15 @@ export default function Dashboard() {
           id: t.id,
           label,
           emoji: t.modalidades?.emoji ?? '🏃',
+          polo: t.polos?.nome ?? '—',
+          horario: t.horario ?? '—',
           rate,
           total: tp.length,
         }
       })
       .filter(Boolean)
       .sort((a, b) => b.rate - a.rate)
-      .slice(0, 10)
+      .slice(0, 30)
   }, [turmas, presencas])
 
   // Top alunos por frequência
@@ -290,71 +292,100 @@ export default function Dashboard() {
 
         </div>
 
-        {/* Row: Alunos por Modalidade + Frequência por Turma */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
+        {/* Row: Alunos por Modalidade (meia largura) */}
+        <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
+          <p className="text-xs font-bold text-navy-900 dark:text-white mb-3">Alunos por Modalidade</p>
+          {porModalidade.length === 0 ? (
+            <div className="min-h-[120px] flex flex-col items-center justify-center gap-2">
+              <div className="text-2xl">🏃</div>
+              <p className="text-xs text-slate-400 dark:text-slate-500 text-center">
+                Nenhuma turma com alunos ainda.<br />Cadastre turmas e alunos para ver aqui.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3">
+              {porModalidade.map(m => (
+                <div key={m.nome}>
+                  <div className="flex justify-between text-[10px] text-slate-600 dark:text-slate-300 mb-1.5">
+                    <span>{m.emoji} {m.nome}</span>
+                    <span className="font-bold">{m.count}</span>
+                  </div>
+                  <div className="h-2 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-primary-600 to-primary-400 rounded-full transition-all"
+                      style={{ width: alunosAtivos ? `${(m.count / alunosAtivos) * 100}%` : '0%' }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
-          {/* Alunos por modalidade */}
-          <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col">
-            <p className="text-xs font-bold text-navy-900 dark:text-white mb-3">Alunos por Modalidade</p>
-            {porModalidade.length === 0 ? (
-              <div className="flex-1 min-h-[160px] flex flex-col items-center justify-center gap-2">
-                <div className="text-2xl">🏃</div>
-                <p className="text-xs text-slate-400 dark:text-slate-500 text-center">
-                  Nenhuma turma com alunos ainda.<br />Cadastre turmas e alunos para ver aqui.
-                </p>
+        {/* Ranking de Frequência por Turma — full-width, scrollável */}
+        <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-bold text-navy-900 dark:text-white">
+              📋 Ranking de Frequência por Turma — <span className="capitalize">{nomeMes}</span>
+            </p>
+            {turmaFreq.length > 0 && (
+              <span className="text-[10px] text-slate-400 dark:text-slate-500">{turmaFreq.length} turma{turmaFreq.length !== 1 ? 's' : ''} com chamada registrada</span>
+            )}
+          </div>
+          {turmaFreq.length === 0 ? (
+            <div className="min-h-[100px] flex flex-col items-center justify-center gap-2">
+              <span className="text-2xl">📋</span>
+              <p className="text-xs text-slate-400 dark:text-slate-500 text-center">
+                Nenhuma chamada registrada este mês ainda.
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Cabeçalho */}
+              <div className="grid grid-cols-[24px_1fr_auto] gap-x-3 px-2 pb-1.5 border-b border-slate-100 dark:border-navy-700">
+                <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">#</span>
+                <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Turma · Polo · Horário</span>
+                <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 text-right">Freq.</span>
               </div>
-            ) : (
-              <div className="flex-1 flex flex-col justify-center space-y-3">
-                {porModalidade.map(m => (
-                  <div key={m.nome}>
-                    <div className="flex justify-between text-[10px] text-slate-600 dark:text-slate-300 mb-1.5">
-                      <span>{m.emoji} {m.nome}</span>
-                      <span className="font-bold">{m.count}</span>
+              {/* Lista scrollável */}
+              <div className="overflow-y-auto max-h-[420px] divide-y divide-slate-50 dark:divide-navy-700/50">
+                {turmaFreq.map((t, i) => (
+                  <div key={t.id} className="grid grid-cols-[24px_1fr_auto] gap-x-3 items-center px-2 py-2.5">
+                    {/* Rank */}
+                    <span className={`text-[10px] font-bold text-right ${i === 0 ? 'text-amber-500' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-orange-400' : 'text-slate-300 dark:text-navy-600'}`}>
+                      {i + 1}
+                    </span>
+                    {/* Info */}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="text-sm leading-none">{t.emoji}</span>
+                        <span className="text-[11px] font-semibold text-navy-900 dark:text-white truncate">{t.label}</span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[9px] text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-navy-700 px-1.5 py-0.5 rounded-full truncate max-w-[150px]">{t.polo}</span>
+                        {t.horario !== '—' && (
+                          <span className="text-[9px] text-slate-400 dark:text-slate-500">🕐 {t.horario}</span>
+                        )}
+                        <span className="text-[9px] text-slate-400 dark:text-slate-500">{t.total} aula{t.total !== 1 ? 's' : ''}</span>
+                      </div>
                     </div>
-                    <div className="h-2 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-gradient-to-r from-primary-600 to-primary-400 rounded-full transition-all"
-                        style={{ width: alunosAtivos ? `${(m.count / alunosAtivos) * 100}%` : '0%' }}
-                      />
+                    {/* Taxa */}
+                    <div className="text-right flex-shrink-0 flex flex-col items-end gap-1">
+                      <span className={`text-sm font-extrabold leading-none ${t.rate >= 75 ? 'text-emerald-600' : t.rate >= 50 ? 'text-amber-500' : 'text-red-500'}`}>
+                        {t.rate}%
+                      </span>
+                      <div className="w-16 h-1.5 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${t.rate >= 75 ? 'bg-emerald-500' : t.rate >= 50 ? 'bg-amber-400' : 'bg-red-400'}`}
+                          style={{ width: `${t.rate}%` }}
+                        />
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
-            )}
-          </div>
-
-          {/* Frequência por turma */}
-          <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col">
-            <p className="text-xs font-bold text-navy-900 dark:text-white mb-3">Frequência por Turma — <span className="capitalize">{nomeMes}</span></p>
-            {turmaFreq.length === 0 ? (
-              <div className="flex-1 min-h-[160px] flex flex-col items-center justify-center gap-2">
-                <span className="text-2xl">📋</span>
-                <p className="text-xs text-slate-400 dark:text-slate-500 text-center">
-                  Nenhum dado de presença por turma ainda.
-                </p>
-              </div>
-            ) : (
-              <div className="flex-1 flex flex-col justify-center space-y-2.5">
-                {turmaFreq.map(t => (
-                  <div key={t.id}>
-                    <div className="flex justify-between text-[10px] text-slate-600 dark:text-slate-300 mb-1">
-                      <span className="truncate max-w-[70%]">{t.emoji} {t.label}</span>
-                      <span className="font-bold ml-2 flex-shrink-0">{t.rate}%</span>
-                    </div>
-                    <div className="h-1.5 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${
-                          t.rate >= 75 ? 'bg-emerald-500' : t.rate >= 50 ? 'bg-amber-400' : 'bg-red-400'
-                        }`}
-                        style={{ width: `${t.rate}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
+            </>
+          )}
         </div>
 
         {/* Top alunos por frequência */}
