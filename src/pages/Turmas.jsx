@@ -17,8 +17,8 @@ const FAIXAS = ['Infantil','Adulto','Melhor Idade']
 const EMPTY_FORM = { polo_id: '', modalidade_id: '', professor_id: '', faixa: 'Adulto', dias: [], horario: '', capacidade: 20, status: 'Ativa' }
 
 export default function Turmas() {
-  const { isAdmin, isCoordenador, isProfessor, profile } = useAuth()
-  const canEdit = isAdmin || isCoordenador || isProfessor
+  const { isAdmin, isCoordenador, isProfessor, isEstagiario, profile } = useAuth()
+  const canEdit = isAdmin || isCoordenador || isProfessor || isEstagiario
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const poloIdFilter = searchParams.get('polo_id')
@@ -86,7 +86,9 @@ export default function Turmas() {
   }
 
   const turmasFiltradas = (() => {
-    let list = (isAdmin || isCoordenador) ? turmas : turmas.filter(t => t.professor_id === profile?.id)
+    let list = (isAdmin || isCoordenador || isEstagiario)
+      ? turmas
+      : turmas.filter(t => t.professor_id === profile?.id)
     if (poloIdFilter) list = list.filter(t => t.polos?.id === poloIdFilter || t.polo_id === poloIdFilter)
     return list
   })()
@@ -152,7 +154,7 @@ export default function Turmas() {
                       <button onClick={() => openEdit(t)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
                         <Pencil size={13}/>
                       </button>
-                      {(isAdmin || isCoordenador) && (
+                      {(isAdmin || isCoordenador || isProfessor) && (
                         <button onClick={() => setDeletando(t)} className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors">
                           <Trash2 size={13}/>
                         </button>
