@@ -111,9 +111,10 @@ export default function Dashboard() {
   }).length, [alunos])
 
   const freqMedia = useMemo(() => {
-    if (!presencas.length) return 0
-    return Math.round((presencas.filter(p => p.status === 'presente' || p.status === 'justificado').length / presencas.length) * 100)
-  }, [presencas])
+    const doMes = presencas.filter(p => p.data >= inicioMes && p.data <= fimMes)
+    if (!doMes.length) return 0
+    return Math.round((doMes.filter(p => p.status === 'presente' || p.status === 'justificado').length / doMes.length) * 100)
+  }, [presencas, inicioMes, fimMes])
 
   const ocupacao = useMemo(() => {
     const cap = turmas.filter(t => t.status === 'Ativa').reduce((s, t) => s + (t.capacidade || 0), 0)
@@ -260,7 +261,7 @@ export default function Dashboard() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <KpiCard label="Alunos Ativos" value={alunosAtivos} sub={`em ${turmasAtivas} turmas`} highlight />
           <KpiCard label="Turmas Ativas" value={turmasAtivas} sub="em funcionamento" />
-          <KpiCard label="Freq. Média" value={`${freqMedia}%`} sub="geral" />
+          <KpiCard label="Freq. Média" value={`${freqMedia}%`} sub={nomeMes} />
           <KpiCard label="Melhor Idade" value={melhorIdade} sub="alunos 60+" />
         </div>
 

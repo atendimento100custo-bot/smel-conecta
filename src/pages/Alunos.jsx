@@ -75,6 +75,7 @@ export default function Alunos() {
   const { data: polos } = useSupabaseData('polos', 'id,nome')
   const { data: presencas } = useSupabaseData('presencas', 'id,data,status,turma_id,aluno_id')
   const { data: atestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id')
+  const { data: atribuicoes } = useSupabaseData('atribuicoes', 'id,usuario_id,turma_id,polo_id')
 
   // Novo / Editar aluno
   const [modalOpen, setModalOpen] = useState(false)
@@ -117,13 +118,23 @@ export default function Alunos() {
   const [importDone, setImportDone] = useState(false)
 
   // ─── filtro por papel + drill-down ───────────────────────────
+  // Turmas acessíveis para professor: via atribuicoes (fonte única) + campo legado professor_id
+  const minhasTurmaIds = useMemo(() => {
+    if (isAdmin || isCoordenador || isEstagiario || !profile) return null // null = acesso total
+    const ids = new Set(
+      atribuicoes
+        .filter(a => a.usuario_id === profile.id && a.turma_id)
+        .map(a => a.turma_id)
+    )
+    // compatibilidade com campo legado professor_id
+    turmas.forEach(t => { if (t.professor_id === profile.id) ids.add(t.id) })
+    return ids
+  }, [isAdmin, isCoordenador, isEstagiario, profile, atribuicoes, turmas])
+
   const alunosFiltrados = (() => {
-    let list = (isAdmin || isCoordenador || isEstagiario)
+    let list = minhasTurmaIds === null
       ? alunos
-      : alunos.filter(a => {
-          const turma = turmas.find(t => t.id === a.turma_id)
-          return turma?.professor_id === profile?.id
-        })
+      : alunos.filter(a => minhasTurmaIds.has(a.turma_id))
     if (turmaIdFilter) list = list.filter(a => a.turma_id === turmaIdFilter)
     if (filtroFaixa) list = list.filter(a => calcFaixa(a.data_nasc) === filtroFaixa)
     if (filtroModalidade) list = list.filter(a => a.turmas?.modalidades?.nome === filtroModalidade)
