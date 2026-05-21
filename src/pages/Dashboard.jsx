@@ -405,7 +405,7 @@ export default function Dashboard() {
         {/* Top Alunos | Top Polos — lado a lado, mesmo tamanho, scroll interno */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
 
-          {/* Top 10 Alunos — Maior Frequência */}
+          {/* Top 10 Alunos — Maior Frequência: se adequa ao tamanho do Top Polos, scroll interno */}
           <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col">
             <p className="text-xs font-bold text-navy-900 dark:text-white mb-3 shrink-0">🏆 Top Alunos — Maior Frequência</p>
             {topAlunos.length === 0 ? (
@@ -413,7 +413,7 @@ export default function Dashboard() {
                 <p className="text-xs text-slate-400 dark:text-slate-500 text-center">Registre pelo menos 3 aulas por aluno para aparecer aqui.</p>
               </div>
             ) : (
-              <div className="overflow-y-auto max-h-[340px] space-y-3 pr-1">
+              <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
                 {topAlunos.map((a, i) => (
                   <div key={a.id} className="flex items-center gap-3">
                     <span className={`text-[10px] font-bold w-4 text-right shrink-0 ${
@@ -435,7 +435,7 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Top 5 Polos — Engajamento e Ocupação */}
+          {/* Top 5 Polos — referência de tamanho, sem scroll, conteúdo natural */}
           <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col">
             <p className="text-xs font-bold text-navy-900 dark:text-white mb-3 shrink-0">🏟️ Top Polos — Engajamento e Ocupação</p>
             {topPolos.length === 0 ? (
@@ -443,7 +443,7 @@ export default function Dashboard() {
                 <p className="text-xs text-slate-400 dark:text-slate-500 text-center">Nenhum polo com alunos ativos ainda.</p>
               </div>
             ) : (
-              <div className="overflow-y-auto max-h-[340px] space-y-3 pr-1">
+              <div className="space-y-3 pr-1">
                 {topPolos.map((p, i) => (
                   <div key={p.id} className="flex items-start gap-3">
                     <span className={`text-[10px] font-bold w-4 text-right shrink-0 mt-0.5 ${
