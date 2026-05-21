@@ -59,7 +59,7 @@ export default function Dashboard() {
   const polosAtivos = polos.filter(p => p.status === 'Ativo').length
 
   const alunosNovos = alunos.filter(a =>
-    a.data_matricula && new Date(a.data_matricula) >= ha30
+    a.status === 'Ativo' && a.data_matricula && new Date(a.data_matricula) >= ha30
   ).length
 
   const melhorIdade = useMemo(() => alunos.filter(a => {
@@ -134,7 +134,7 @@ export default function Dashboard() {
       })
       .filter(Boolean)
       .sort((a, b) => b.rate - a.rate)
-      .slice(0, 6)
+      .slice(0, 10)
   }, [turmas, presencas])
 
   // Top alunos por frequência
