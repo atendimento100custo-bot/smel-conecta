@@ -1,5 +1,5 @@
 // src/pages/Dashboard.jsx
-import { useMemo } from 'react'
+import { useMemo, useRef, useLayoutEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { useSupabaseData } from '../hooks/useSupabaseData'
 import { useTheme } from '../contexts/ThemeContext'
@@ -194,6 +194,19 @@ export default function Dashboard() {
     if (semMod > 0) lista.push({ nome: 'Sem modalidade', emoji: '🏃', count: semMod })
     return lista.sort((a, b) => b.count - a.count)
   }, [turmas, alunos, modalidades])
+
+  // Sync Top Alunos height to Top Polos height (Top Polos é a referência)
+  const polosCardRef = useRef(null)
+  const alunosCardRef = useRef(null)
+  useLayoutEffect(() => {
+    const sync = () => {
+      if (!polosCardRef.current || !alunosCardRef.current) return
+      alunosCardRef.current.style.height = `${polosCardRef.current.offsetHeight}px`
+    }
+    sync()
+    window.addEventListener('resize', sync)
+    return () => window.removeEventListener('resize', sync)
+  }, [topPolos.length, topAlunos.length])
 
   // chart theme colors
   const axisColor = dark ? '#475569' : '#94a3b8'
@@ -402,11 +415,11 @@ export default function Dashboard() {
           </div>
         </div>{/* fim grid Modalidade + Freq */}
 
-        {/* Top Alunos | Top Polos — lado a lado, mesmo tamanho, scroll interno */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
+        {/* Top Alunos | Top Polos — Top Polos é a referência de altura (natural), Top Alunos acompanha via ref */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
 
-          {/* Top 10 Alunos — acompanha a altura do Top Polos, scroll interno */}
-          <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col h-[320px]">
+          {/* Top 10 Alunos — altura definida pelo useLayoutEffect para igualar Top Polos */}
+          <div ref={alunosCardRef} className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col overflow-hidden">
             <p className="text-xs font-bold text-navy-900 dark:text-white mb-3 shrink-0">🏆 Top Alunos — Maior Frequência</p>
             {topAlunos.length === 0 ? (
               <div className="flex-1 flex items-center justify-center">
@@ -435,11 +448,11 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Top 5 Polos — referência de tamanho, conteúdo natural sem scroll */}
-          <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col h-[320px]">
+          {/* Top 5 Polos — referência de altura, tamanho natural pelo conteúdo */}
+          <div ref={polosCardRef} className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col">
             <p className="text-xs font-bold text-navy-900 dark:text-white mb-3 shrink-0">🏟️ Top Polos — Engajamento e Ocupação</p>
             {topPolos.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center">
+              <div className="py-8 flex items-center justify-center">
                 <p className="text-xs text-slate-400 dark:text-slate-500 text-center">Nenhum polo com alunos ativos ainda.</p>
               </div>
             ) : (
