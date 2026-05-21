@@ -154,7 +154,7 @@ export default function Dashboard() {
       })
       .filter(Boolean)
       .sort((a, b) => b.rate - a.rate)
-      .slice(0, 5)
+      .slice(0, 10)
   }, [alunos, presencas])
 
   const topPolos = useMemo(() => {
@@ -313,9 +313,10 @@ export default function Dashboard() {
         </div>
 
         {/* Row: Alunos por Modalidade | Ranking de Frequência por Turma — lado a lado */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+        {/* A altura é ditada pelo card Modalidade (sem scroll). Freq usa o mesmo espaço e rola se tiver mais itens. */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
 
-          {/* Alunos por Modalidade */}
+          {/* Alunos por Modalidade — sem scroll, all items, dita a altura do grid */}
           <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col">
             <p className="text-xs font-bold text-navy-900 dark:text-white mb-3">Alunos por Modalidade</p>
             {porModalidade.length === 0 ? (
@@ -326,7 +327,7 @@ export default function Dashboard() {
                 </p>
               </div>
             ) : (
-              <div className="overflow-y-auto max-h-[420px] space-y-3 pr-1">
+              <div className="space-y-3 pr-1">
                 {porModalidade.map(m => (
                   <div key={m.nome}>
                     <div className="flex items-center justify-between text-[10px] text-slate-600 dark:text-slate-300 mb-1.5">
@@ -345,9 +346,9 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Ranking de Frequência por Turma */}
-          <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col">
-            <div className="flex items-center justify-between mb-3">
+          {/* Ranking de Frequência por Turma — mesmo tamanho que Modalidade, scroll interno */}
+          <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col h-full">
+            <div className="flex items-center justify-between mb-3 shrink-0">
               <p className="text-xs font-bold text-navy-900 dark:text-white">
                 📋 Freq. por Turma — <span className="capitalize">{nomeMes}</span>
               </p>
@@ -356,7 +357,7 @@ export default function Dashboard() {
               )}
             </div>
             {turmaFreq.length === 0 ? (
-              <div className="min-h-[120px] flex flex-col items-center justify-center gap-2">
+              <div className="flex-1 flex flex-col items-center justify-center gap-2">
                 <span className="text-2xl">📋</span>
                 <p className="text-xs text-slate-400 dark:text-slate-500 text-center">
                   Nenhuma chamada registrada este mês ainda.
@@ -364,14 +365,14 @@ export default function Dashboard() {
               </div>
             ) : (
               <>
-                {/* Cabeçalho */}
-                <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100 dark:border-navy-700 mb-0.5">
+                {/* Cabeçalho fixo */}
+                <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100 dark:border-navy-700 mb-0.5 shrink-0">
                   <span className="w-5 shrink-0 text-[9px] font-bold uppercase tracking-widest text-slate-400 text-right">#</span>
                   <span className="flex-1 text-[9px] font-bold uppercase tracking-widest text-slate-400">Turma · Polo · Horário</span>
                   <span className="w-20 shrink-0 text-[9px] font-bold uppercase tracking-widest text-slate-400 text-right">Freq.</span>
                 </div>
-                {/* Lista scrollável */}
-                <div className="overflow-y-auto max-h-[420px]">
+                {/* Lista: flex-1 + overflow-y-auto → ocupa o espaço restante e rola se necessário */}
+                <div className="flex-1 min-h-0 overflow-y-auto">
                   {turmaFreq.map((t, i) => (
                     <div key={t.id} className="flex items-center gap-2 py-2 border-b border-slate-50 dark:border-navy-700/40 hover:bg-slate-50/60 dark:hover:bg-navy-700/30 transition-colors rounded-sm">
                       <span className={`w-5 shrink-0 text-[10px] font-bold text-right ${
@@ -396,24 +397,23 @@ export default function Dashboard() {
                     </div>
                   ))}
                 </div>
-            </>
-          )}
-        </div>
-        </div>{/* fim grid lado-a-lado */}
+              </>
+            )}
+          </div>
+        </div>{/* fim grid Modalidade + Freq */}
 
-        {/* Top alunos por frequência */}
-        {/* Top Alunos | Top Polos — lado a lado */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Top Alunos | Top Polos — lado a lado, mesmo tamanho, scroll interno */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
 
-          {/* Top 5 Alunos — Maior Frequência */}
-          <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
-            <p className="text-xs font-bold text-navy-900 dark:text-white mb-3">🏆 Top Alunos — Maior Frequência</p>
+          {/* Top 10 Alunos — Maior Frequência */}
+          <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col">
+            <p className="text-xs font-bold text-navy-900 dark:text-white mb-3 shrink-0">🏆 Top Alunos — Maior Frequência</p>
             {topAlunos.length === 0 ? (
-              <div className="min-h-[100px] flex items-center justify-center">
+              <div className="flex-1 flex items-center justify-center min-h-[100px]">
                 <p className="text-xs text-slate-400 dark:text-slate-500 text-center">Registre pelo menos 3 aulas por aluno para aparecer aqui.</p>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="overflow-y-auto max-h-[340px] space-y-3 pr-1">
                 {topAlunos.map((a, i) => (
                   <div key={a.id} className="flex items-center gap-3">
                     <span className={`text-[10px] font-bold w-4 text-right shrink-0 ${
@@ -436,14 +436,14 @@ export default function Dashboard() {
           </div>
 
           {/* Top 5 Polos — Engajamento e Ocupação */}
-          <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
-            <p className="text-xs font-bold text-navy-900 dark:text-white mb-3">🏟️ Top Polos — Engajamento e Ocupação</p>
+          <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col">
+            <p className="text-xs font-bold text-navy-900 dark:text-white mb-3 shrink-0">🏟️ Top Polos — Engajamento e Ocupação</p>
             {topPolos.length === 0 ? (
-              <div className="min-h-[100px] flex items-center justify-center">
+              <div className="flex-1 flex items-center justify-center min-h-[100px]">
                 <p className="text-xs text-slate-400 dark:text-slate-500 text-center">Nenhum polo com alunos ativos ainda.</p>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="overflow-y-auto max-h-[340px] space-y-3 pr-1">
                 {topPolos.map((p, i) => (
                   <div key={p.id} className="flex items-start gap-3">
                     <span className={`text-[10px] font-bold w-4 text-right shrink-0 mt-0.5 ${
