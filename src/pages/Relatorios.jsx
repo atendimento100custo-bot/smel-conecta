@@ -49,7 +49,7 @@ function ProgramCard({ prog, turmas, alunos, presencas, mesInt, anoInt }) {
   const fim = new Date(anoInt, mesInt, 0).toISOString().split('T')[0]
   const novos = ativos.filter(a => a.data_matricula >= ini && a.data_matricula <= fim).length
   const pres = presencas.filter(p => ids.has(p.turma_id))
-  const freq = pres.length ? Math.round(pres.filter(p => p.presente).length / pres.length * 100) : 0
+  const freq = pres.length ? Math.round(pres.filter(p => p.status === 'presente' || p.status === 'justificado').length / pres.length * 100) : 0
   const cor = PROG_COLORS[prog]
 
   return (
@@ -104,7 +104,7 @@ export default function Relatorios() {
   const hoje = new Date()
   const { data: turmas } = useSupabaseData('turmas', '*, modalidades(nome,emoji), polos(nome)')
   const { data: alunos } = useSupabaseData('alunos', 'id,nome,status,turma_id,data_nasc,data_matricula,genero')
-  const { data: presencas } = useSupabaseData('presencas', 'id,data,presente,turma_id')
+  const { data: presencas } = useSupabaseData('presencas', 'id,data,status,turma_id')
   const { data: modalidades } = useSupabaseData('modalidades', 'id,nome,emoji')
   const { data: polos } = useSupabaseData('polos', 'id,nome')
 
@@ -129,7 +129,7 @@ export default function Relatorios() {
 
   const totalAtivos = alunosFiltrados.length
   const novosNoMes = alunosFiltrados.filter(a => a.data_matricula >= ini && a.data_matricula <= fim).length
-  const freqMedia = presencasMes.length ? Math.round(presencasMes.filter(p => p.presente).length / presencasMes.length * 100) : 0
+  const freqMedia = presencasMes.length ? Math.round(presencasMes.filter(p => p.status === 'presente' || p.status === 'justificado').length / presencasMes.length * 100) : 0
   const turmasAtivas = turmasFiltradas.filter(t => t.status === 'Ativa').length
   const melhorIdade = alunosFiltrados.filter(a => a.data_nasc && new Date().getFullYear() - new Date(a.data_nasc).getFullYear() >= 60).length
 
@@ -139,7 +139,7 @@ export default function Relatorios() {
     const pMes = presencasFiltradas.filter(p => p.data >= i0 && p.data <= i1)
     return {
       mes: format(d, 'MMM/yy', { locale: ptBR }),
-      'Freq.%': pMes.length ? Math.round(pMes.filter(p => p.presente).length / pMes.length * 100) : 0,
+      'Freq.%': pMes.length ? Math.round(pMes.filter(p => p.status === 'presente' || p.status === 'justificado').length / pMes.length * 100) : 0,
       'Novos': alunos.filter(a => turmaIds.has(a.turma_id) && a.data_matricula >= i0 && a.data_matricula <= i1).length,
     }
   }), [presencasFiltradas, alunos, turmaIds, anoInt, mesInt])

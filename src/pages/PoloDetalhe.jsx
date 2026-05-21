@@ -123,7 +123,7 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
     const map = {}
     alunosTurma.forEach(a => {
       const ex = existentes.find(p => p.aluno_id === a.id)
-      map[a.id] = ex ? ex.presente : false
+      map[a.id] = ex ? (ex.status === 'presente') : false
     })
     setPresencaMap(map)
 
@@ -149,11 +149,11 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
       if (latestIds[aluno_id]) {
         toUpdate.push({ id: latestIds[aluno_id], presente })
       } else {
-        toInsert.push({ turma_id: turma.id, aluno_id, data: dataHoje, presente })
+        toInsert.push({ turma_id: turma.id, aluno_id, data: dataHoje, status: presente ? 'presente' : 'falta' })
       }
     })
     await Promise.all([
-      ...toUpdate.map(r => supabase.from('presencas').update({ presente: r.presente }).eq('id', r.id)),
+      ...toUpdate.map(r => supabase.from('presencas').update({ status: r.presente ? 'presente' : 'falta' }).eq('id', r.id)),
       toInsert.length ? supabase.from('presencas').insert(toInsert) : Promise.resolve(),
     ])
   }
@@ -386,7 +386,7 @@ export default function PoloDetalhe() {
   const { data: polos } = useSupabaseData('polos', '*')
   const { data: turmas, reload: reloadTurmas, loading: loadingTurmas } = useSupabaseData('turmas', '*, modalidades(nome,emoji), profiles(id,nome,cargo), polos(nome)')
   const { data: alunos } = useSupabaseData('alunos', 'id,nome,status,turma_id,data_nasc,data_matricula')
-  const { data: presencas, reload: reloadPresencas } = useSupabaseData('presencas', 'id,data,presente,turma_id,aluno_id')
+  const { data: presencas, reload: reloadPresencas } = useSupabaseData('presencas', 'id,data,status,turma_id,aluno_id')
   const { data: atestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id')
   const { data: viagens, reload: reloadViagens } = useSupabaseData('viagens', '*, turmas(*, modalidades(nome,emoji))')
   const { data: modalidades } = useSupabaseData('modalidades', 'id,nome,emoji')
@@ -636,7 +636,7 @@ export default function PoloDetalhe() {
   const turmasAtivas = turmasPolo.filter(t => t.status === 'Ativa').length
   const freqMedia = useMemo(() => {
     if (!presencasPolo.length) return 0
-    return Math.round((presencasPolo.filter(p => p.presente).length / presencasPolo.length) * 100)
+    return Math.round((presencasPolo.filter(p => p.status === 'presente' || p.status === 'justificado').length / presencasPolo.length) * 100)
   }, [presencasPolo])
   const melhorIdade = useMemo(() => alunosPolo.filter(a => {
     if (a.status !== 'Ativo' || !a.data_nasc) return false
@@ -676,7 +676,7 @@ export default function PoloDetalhe() {
     const d = subDays(new Date(), 6 - i)
     const dStr = format(d, 'yyyy-MM-dd')
     const dp = presencasPolo.filter(p => (p.data ?? '').slice(0, 10) === dStr)
-    return { dia: format(d, 'EEE', { locale: ptBR }), Presentes: dp.filter(p => p.presente).length, Faltas: dp.filter(p => !p.presente).length }
+    return { dia: format(d, 'EEE', { locale: ptBR }), Presentes: dp.filter(p => p.status === 'presente').length, Faltas: dp.filter(p => p.status === 'falta').length }
   })
 
   // Modalidades agrupadas
@@ -1388,7 +1388,7 @@ export default function PoloDetalhe() {
                       {visiveis.map(r => {
                         const turma = turmasPolo.find(t => t.id === r.turma_id)
                         const presencasDia = presencas.filter(p => p.turma_id === r.turma_id && p.data === r.data)
-                        const presentes = presencasDia.filter(p => p.presente).length
+                        const presentes = presencasDia.filter(p => p.status === 'presente' || p.status === 'justificado').length
                         const total = presencasDia.length
                         return (
                           <div key={r.id} className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-3">
@@ -1514,7 +1514,7 @@ export default function PoloDetalhe() {
                 // Enriquecer com freq e ordenar por freq desc (ranking)
                 const alunosMelhorIdade = alunosMelhorIdadeRaw.map(a => {
                   const pAluno = presencas.filter(p => p.aluno_id === a.id)
-                  const freqAluno = pAluno.length > 0 ? Math.round(pAluno.filter(p => p.presente).length / pAluno.length * 100) : null
+                  const freqAluno = pAluno.length > 0 ? Math.round(pAluno.filter(p => p.status === 'presente' || p.status === 'justificado').length / pAluno.length * 100) : null
                   return { ...a, freqAluno, pAluno }
                 }).sort((a, b) => {
                   if (a.freqAluno === null && b.freqAluno === null) return 0

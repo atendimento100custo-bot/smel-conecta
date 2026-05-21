@@ -46,7 +46,7 @@ function DetalheModal({ modalidade, turmas, alunos, presencas, open, onClose }) 
   // Frequência média
   const presencasDaModal = presencas.filter(p => turmaIds.includes(p.turma_id))
   const freqMedia = presencasDaModal.length > 0
-    ? Math.round((presencasDaModal.filter(p => p.presente).length / presencasDaModal.length) * 100)
+    ? Math.round((presencasDaModal.filter(p => p.status === 'presente' || p.status === 'justificado').length / presencasDaModal.length) * 100)
     : 0
 
   // Polos distintos
@@ -158,7 +158,7 @@ export default function Modalidades() {
   const { data: modalidades, loading, reload } = useSupabaseData('modalidades')
   const { data: turmas } = useSupabaseData('turmas', '*, polos(nome), modalidades(nome,emoji)')
   const { data: alunos } = useSupabaseData('alunos', 'id,status,turma_id')
-  const { data: presencas } = useSupabaseData('presencas', 'id,presente,turma_id')
+  const { data: presencas } = useSupabaseData('presencas', 'id,status,turma_id')
 
   // Detalhe
   const [detalhe, setDetalhe] = useState(null)

@@ -165,7 +165,7 @@ export default function AlunoDetalhe() {
       const mes = p.data?.slice(0, 7) // YYYY-MM
       if (!mes) return
       if (!grouped[mes]) grouped[mes] = { presentes: 0, faltas: 0 }
-      if (p.presente) grouped[mes].presentes++
+      if (p.status === 'presente' || p.status === 'justificado') grouped[mes].presentes++
       else grouped[mes].faltas++
     })
     return Object.entries(grouped).sort(([a], [b]) => b.localeCompare(a)).slice(0, 6).map(([mes, v]) => {
@@ -177,7 +177,7 @@ export default function AlunoDetalhe() {
   })()
 
   const freqGeral = presencas.length
-    ? Math.round((presencas.filter(p => p.presente).length / presencas.length) * 100)
+    ? Math.round((presencas.filter(p => p.status === 'presente' || p.status === 'justificado').length / presencas.length) * 100)
     : 0
 
   const idade = calcIdade(aluno?.data_nasc)
@@ -317,11 +317,11 @@ export default function AlunoDetalhe() {
               </div>
               <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
                 <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1">Presenças</p>
-                <p className="text-3xl font-extrabold text-primary-600">{presencas.filter(p => p.presente).length}</p>
+                <p className="text-3xl font-extrabold text-primary-600">{presencas.filter(p => p.status === 'presente' || p.status === 'justificado').length}</p>
               </div>
               <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
                 <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1">Faltas</p>
-                <p className="text-3xl font-extrabold text-red-400">{presencas.filter(p => !p.presente).length}</p>
+                <p className="text-3xl font-extrabold text-red-400">{presencas.filter(p => p.status === 'falta').length}</p>
               </div>
             </div>
 
@@ -357,12 +357,14 @@ export default function AlunoDetalhe() {
                 <div className="space-y-1 max-h-60 overflow-y-auto">
                   {presencas.slice(0, 30).map(p => (
                     <div key={p.id} className="flex items-center gap-3 py-1">
-                      {p.presente
+                      {p.status === 'presente'
                         ? <CheckCircle2 size={14} className="text-primary-600 flex-shrink-0" />
-                        : <Circle size={14} className="text-red-400 flex-shrink-0" />}
+                        : p.status === 'justificado'
+                          ? <CheckCircle2 size={14} className="text-amber-500 flex-shrink-0" />
+                          : <Circle size={14} className="text-red-400 flex-shrink-0" />}
                       <span className="text-xs text-navy-900 dark:text-white">{formatDate(p.data?.slice(0,10))}</span>
-                      <span className={`ml-auto text-[10px] font-semibold ${p.presente ? 'text-primary-600' : 'text-red-400'}`}>
-                        {p.presente ? 'Presente' : 'Falta'}
+                      <span className={`ml-auto text-[10px] font-semibold ${p.status === 'presente' ? 'text-primary-600' : p.status === 'justificado' ? 'text-amber-500' : 'text-red-400'}`}>
+                        {p.status === 'presente' ? 'Presente' : p.status === 'justificado' ? 'Justificado' : 'Falta'}
                       </span>
                     </div>
                   ))}

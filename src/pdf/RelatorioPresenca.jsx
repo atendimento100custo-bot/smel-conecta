@@ -40,8 +40,8 @@ export function RelatorioPresenca({ turma, alunos, presencas, mes, ano }) {
 
           {alunos.map(aluno => {
             const aPresencas = presencas.filter(p => p.aluno_id === aluno.id)
-            const presentes = aPresencas.filter(p => p.presente).length
-            const faltas = aPresencas.filter(p => !p.presente).length
+            const presentes = aPresencas.filter(p => p.status === 'presente' || p.status === 'justificado').length
+            const faltas = aPresencas.filter(p => p.status === 'falta').length
             const freq = aPresencas.length ? Math.round((presentes / aPresencas.length) * 100) : 0
             return (
               <View key={aluno.id} style={styles.row}>

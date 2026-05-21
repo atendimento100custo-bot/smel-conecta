@@ -126,7 +126,7 @@ function getProgStats(prog, turmas, alunos, presencas, mesInt, anoInt) {
   const fim = new Date(anoInt, mesInt, 0).toISOString().split('T')[0]
   const novos = ativos.filter(a => a.data_matricula >= ini && a.data_matricula <= fim).length
   const pres = presencas.filter(p => ids.has(p.turma_id) && p.data >= ini && p.data <= fim)
-  const freq = pres.length ? Math.round(pres.filter(p => p.presente).length / pres.length * 100) : 0
+  const freq = pres.length ? Math.round(pres.filter(p => p.status === 'presente' || p.status === 'justificado').length / pres.length * 100) : 0
   return { total, homens, mulheres, novos, freq }
 }
 
@@ -141,7 +141,7 @@ export function RelatorioCompleto({ polo, turmas = [], alunos = [], presencas = 
   const totalAtivos = alunos.filter(a => a.status === 'Ativo').length
   const novosNoMes = alunos.filter(a => a.status === 'Ativo' && a.data_matricula >= ini && a.data_matricula <= fim).length
   const presMes = presencas.filter(p => p.data >= ini && p.data <= fim)
-  const freqMedia = presMes.length ? Math.round(presMes.filter(p => p.presente).length / presMes.length * 100) : 0
+  const freqMedia = presMes.length ? Math.round(presMes.filter(p => p.status === 'presente' || p.status === 'justificado').length / presMes.length * 100) : 0
   const turmasAtivas = turmas.filter(t => t.status === 'Ativa').length
   const melhorIdade = alunos.filter(a => a.status === 'Ativo' && a.data_nasc && new Date().getFullYear() - new Date(a.data_nasc).getFullYear() >= 60).length
 

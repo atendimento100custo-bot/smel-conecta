@@ -73,7 +73,7 @@ export default function Alunos() {
   const { data: turmas } = useSupabaseData('turmas', '*, modalidades(nome), polos(nome)')
   const { data: modalidades } = useSupabaseData('modalidades', 'id,nome')
   const { data: polos } = useSupabaseData('polos', 'id,nome')
-  const { data: presencas } = useSupabaseData('presencas', 'id,data,presente,turma_id,aluno_id')
+  const { data: presencas } = useSupabaseData('presencas', 'id,data,status,turma_id,aluno_id')
   const { data: atestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id')
 
   // Novo / Editar aluno
@@ -105,7 +105,7 @@ export default function Alunos() {
     if (idade < 60 || a.status !== 'Ativo') return null
     const temAtestadoValido = atestados.some(at => at.aluno_id === a.id && at.data_validade >= hoje_str)
     const pAluno = presencas.filter(p => p.aluno_id === a.id)
-    const freq = pAluno.length > 0 ? Math.round(pAluno.filter(p => p.presente).length / pAluno.length * 100) : 0
+    const freq = pAluno.length > 0 ? Math.round(pAluno.filter(p => p.status === 'presente' || p.status === 'justificado').length / pAluno.length * 100) : 0
     return temAtestadoValido && freq >= 70
   }
 
@@ -145,7 +145,7 @@ export default function Alunos() {
   const alunosParaExibir = useMemo(() => {
     const comFreq = alunosVisiveis.map(a => {
       const pAluno = presencas.filter(p => p.aluno_id === a.id)
-      const freq = pAluno.length > 0 ? Math.round(pAluno.filter(p => p.presente).length / pAluno.length * 100) : null
+      const freq = pAluno.length > 0 ? Math.round(pAluno.filter(p => p.status === 'presente' || p.status === 'justificado').length / pAluno.length * 100) : null
       return { ...a, freq }
     })
     if (!turmaIdFilter) return comFreq

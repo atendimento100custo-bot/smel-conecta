@@ -21,7 +21,7 @@ function calcFreqMes(alunoId, presencas, mes, ano) {
     return p.aluno_id === alunoId && d.getMonth() + 1 === mes && d.getFullYear() === ano
   })
   if (!doMes.length) return 0
-  return Math.round((doMes.filter(p => p.presente).length / doMes.length) * 100)
+  return Math.round((doMes.filter(p => p.status === 'presente' || p.status === 'justificado').length / doMes.length) * 100)
 }
 
 const TABS = [
@@ -48,7 +48,7 @@ export default function MelhorIdade() {
   const [tab, setTab]   = useState('elegivel')
 
   const { data: alunos,   loading: loadA } = useSupabaseData('alunos',   '*, turmas(*, modalidades(nome), polos(nome))')
-  const { data: presencas, loading: loadP } = useSupabaseData('presencas', 'id, aluno_id, data, presente')
+  const { data: presencas, loading: loadP } = useSupabaseData('presencas', 'id, aluno_id, data, status')
 
   const anosDisponiveis = useMemo(() => {
     const ano_atual = hoje.getFullYear()
