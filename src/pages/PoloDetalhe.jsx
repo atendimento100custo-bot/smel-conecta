@@ -642,7 +642,7 @@ export default function PoloDetalhe() {
     if (a.status !== 'Ativo' || !a.data_nasc) return false
     return new Date().getFullYear() - new Date(a.data_nasc).getFullYear() >= 60
   }).length, [alunosPolo])
-  const alunosNovos = alunosPolo.filter(a => a.data_matricula && new Date(a.data_matricula) >= ha30).length
+  const alunosNovos = alunosPolo.filter(a => a.status === 'Ativo' && a.data_matricula && new Date(a.data_matricula) >= ha30).length
   const ocupacao = useMemo(() => {
     const cap = turmasPolo.filter(t => t.status === 'Ativa').reduce((s, t) => s + (t.capacidade || 0), 0)
     return cap ? Math.round((alunosAtivos / cap) * 100) : 0
