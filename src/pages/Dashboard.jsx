@@ -44,7 +44,7 @@ function ChartTooltip({ active, payload, label }) {
 export default function Dashboard() {
   const { dark } = useTheme()
   const { data: alunos } = useSupabaseData('alunos', 'id,nome,status,turma_id,data_nasc,data_matricula')
-  const { data: turmas } = useSupabaseData('turmas', 'id,status,modalidade_id,capacidade,faixa,horario,polo_id,modalidades(nome,emoji),polos(nome)')
+  const { data: turmas } = useSupabaseData('turmas', 'id,status,modalidade_id,capacidade,faixa,horario,polo_id,modalidades(nome,emoji),polos(nome,tipo,bairro)')
   const { data: presencas } = useSupabaseData('presencas', 'id,data,status,turma_id,aluno_id')
   const { data: atestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id')
   const { data: polos } = useSupabaseData('polos', 'id,status')
@@ -131,7 +131,7 @@ export default function Dashboard() {
           id: t.id,
           label,
           emoji: t.modalidades?.emoji ?? '🏃',
-          polo: t.polos?.nome ?? '—',
+          polo: t.polos ? [t.polos.tipo, t.polos.bairro].filter(Boolean).join(' · ') || t.polos.nome : '—',
           horario: t.horario ?? '—',
           rate,
           total: tp.length,
@@ -342,44 +342,37 @@ export default function Dashboard() {
           ) : (
             <>
               {/* Cabeçalho */}
-              <div className="grid grid-cols-[24px_1fr_auto] gap-x-3 px-2 pb-1.5 border-b border-slate-100 dark:border-navy-700">
-                <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">#</span>
-                <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Turma · Polo · Horário</span>
-                <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 text-right">Freq.</span>
+              <div className="flex items-center gap-2 px-2 pb-1.5 border-b border-slate-100 dark:border-navy-700">
+                <span className="w-5 shrink-0 text-[9px] font-bold uppercase tracking-widest text-slate-400 text-right">#</span>
+                <span className="flex-1 text-[9px] font-bold uppercase tracking-widest text-slate-400">Turma · Polo · Horário</span>
+                <span className="w-24 shrink-0 text-[9px] font-bold uppercase tracking-widest text-slate-400 text-right">Freq.</span>
               </div>
               {/* Lista scrollável */}
-              <div className="overflow-y-auto max-h-[420px] divide-y divide-slate-50 dark:divide-navy-700/50">
+              <div className="overflow-y-auto max-h-[420px]">
                 {turmaFreq.map((t, i) => (
-                  <div key={t.id} className="grid grid-cols-[24px_1fr_auto] gap-x-3 items-center px-2 py-2.5">
+                  <div key={t.id} className="flex items-center gap-2 px-2 py-2 border-b border-slate-50 dark:border-navy-700/40 hover:bg-slate-50/60 dark:hover:bg-navy-700/30 transition-colors">
                     {/* Rank */}
-                    <span className={`text-[10px] font-bold text-right ${i === 0 ? 'text-amber-500' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-orange-400' : 'text-slate-300 dark:text-navy-600'}`}>
-                      {i + 1}
-                    </span>
-                    {/* Info */}
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 mb-0.5">
-                        <span className="text-sm leading-none">{t.emoji}</span>
-                        <span className="text-[11px] font-semibold text-navy-900 dark:text-white truncate">{t.label}</span>
-                      </div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[9px] text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-navy-700 px-1.5 py-0.5 rounded-full truncate max-w-[150px]">{t.polo}</span>
-                        {t.horario !== '—' && (
-                          <span className="text-[9px] text-slate-400 dark:text-slate-500">🕐 {t.horario}</span>
-                        )}
-                        <span className="text-[9px] text-slate-400 dark:text-slate-500">{t.total} aula{t.total !== 1 ? 's' : ''}</span>
-                      </div>
+                    <span className={`w-5 shrink-0 text-[10px] font-bold text-right ${
+                      i === 0 ? 'text-amber-400' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-orange-400' : 'text-slate-300 dark:text-navy-600'
+                    }`}>{i + 1}</span>
+                    {/* Emoji */}
+                    <span className="text-base shrink-0 leading-none">{t.emoji}</span>
+                    {/* Info — ocupa todo o espaço disponível */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-semibold text-navy-900 dark:text-white truncate leading-snug">{t.label}</p>
+                      <p className="text-[9px] text-slate-400 dark:text-slate-500 truncate leading-snug">
+                        {t.polo}{t.horario !== '—' ? ` · ${t.horario}` : ''} · {t.total} aula{t.total !== 1 ? 's' : ''}
+                      </p>
                     </div>
-                    {/* Taxa */}
-                    <div className="text-right flex-shrink-0 flex flex-col items-end gap-1">
-                      <span className={`text-sm font-extrabold leading-none ${t.rate >= 75 ? 'text-emerald-600' : t.rate >= 50 ? 'text-amber-500' : 'text-red-500'}`}>
-                        {t.rate}%
-                      </span>
-                      <div className="w-16 h-1.5 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${t.rate >= 75 ? 'bg-emerald-500' : t.rate >= 50 ? 'bg-amber-400' : 'bg-red-400'}`}
-                          style={{ width: `${t.rate}%` }}
-                        />
+                    {/* Barra + % */}
+                    <div className="shrink-0 flex items-center gap-2 w-24">
+                      <div className="flex-1 h-1.5 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full ${t.rate >= 75 ? 'bg-emerald-500' : t.rate >= 50 ? 'bg-amber-400' : 'bg-red-400'}`}
+                          style={{ width: `${t.rate}%` }} />
                       </div>
+                      <span className={`w-9 text-right text-[11px] font-extrabold shrink-0 ${
+                        t.rate >= 75 ? 'text-emerald-600' : t.rate >= 50 ? 'text-amber-500' : 'text-red-500'
+                      }`}>{t.rate}%</span>
                     </div>
                   </div>
                 ))}
