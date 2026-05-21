@@ -45,7 +45,7 @@ export default function Dashboard() {
   const { dark } = useTheme()
   const { data: alunos } = useSupabaseData('alunos', 'id,nome,status,turma_id,data_nasc,data_matricula')
   const { data: turmas } = useSupabaseData('turmas', 'id,status,modalidade_id,capacidade,faixa,modalidades(nome,emoji)')
-  const { data: presencas } = useSupabaseData('presencas', 'id,data,presente,turma_id,aluno_id')
+  const { data: presencas } = useSupabaseData('presencas', 'id,data,status,turma_id,aluno_id')
   const { data: atestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id')
   const { data: polos } = useSupabaseData('polos', 'id,status')
   const { data: modalidades } = useSupabaseData('modalidades', 'id,nome,emoji,status')
@@ -70,7 +70,7 @@ export default function Dashboard() {
 
   const freqMedia = useMemo(() => {
     if (!presencas.length) return 0
-    return Math.round((presencas.filter(p => p.presente).length / presencas.length) * 100)
+    return Math.round((presencas.filter(p => p.status === 'presente' || p.status === 'justificado').length / presencas.length) * 100)
   }, [presencas])
 
   const ocupacao = useMemo(() => {
@@ -97,8 +97,8 @@ export default function Dashboard() {
     const dp = presencas.filter(p => (p.data ?? '').slice(0, 10) === dStr)
     return {
       dia: format(d, 'EEE', { locale: ptBR }),
-      Presentes: dp.filter(p => p.presente).length,
-      Faltas: dp.filter(p => !p.presente).length,
+      Presentes: dp.filter(p => p.status === 'presente').length,
+      Faltas: dp.filter(p => p.status === 'falta').length,
     }
   })
 
@@ -108,10 +108,11 @@ export default function Dashboard() {
     presencas.filter(p => (p.data ?? '').slice(0, 10) === hojeStr)
   , [presencas, hojeStr])
 
-  const hojePresentes = presencasHoje.filter(p => p.presente).length
-  const hojeFaltas = presencasHoje.filter(p => !p.presente).length
+  const hojePresentes = presencasHoje.filter(p => p.status === 'presente').length
+  const hojeJustificados = presencasHoje.filter(p => p.status === 'justificado').length
+  const hojeFaltas = presencasHoje.filter(p => p.status === 'falta').length
   const hojeTotal = presencasHoje.length
-  const hojePct = hojeTotal ? Math.round((hojePresentes / hojeTotal) * 100) : 0
+  const hojePct = hojeTotal ? Math.round(((hojePresentes + hojeJustificados) / hojeTotal) * 100) : 0
 
   // Per-turma attendance rate (all-time)
   const turmaFreq = useMemo(() => {
@@ -120,7 +121,7 @@ export default function Dashboard() {
       .map(t => {
         const tp = presencas.filter(p => p.turma_id === t.id)
         if (!tp.length) return null
-        const rate = Math.round((tp.filter(p => p.presente).length / tp.length) * 100)
+        const rate = Math.round((tp.filter(p => p.status === 'presente' || p.status === 'justificado').length / tp.length) * 100)
         const modNome = t.modalidades?.nome ?? 'Turma'
         const label = t.faixa ? `${modNome} · ${t.faixa}` : modNome
         return {
@@ -143,7 +144,7 @@ export default function Dashboard() {
       .map(a => {
         const ap = presencas.filter(p => p.aluno_id === a.id)
         if (ap.length < 3) return null
-        const rate = Math.round((ap.filter(p => p.presente).length / ap.length) * 100)
+        const rate = Math.round((ap.filter(p => p.status === 'presente' || p.status === 'justificado').length / ap.length) * 100)
         return { id: a.id, nome: a.nome, rate, total: ap.length }
       })
       .filter(Boolean)
