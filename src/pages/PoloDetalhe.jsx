@@ -104,7 +104,13 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
   const alunosTurma = useMemo(() => {
     const norm = (s) => (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
     return alunos
-      .filter(a => a.turma_id === turma?.id)
+      .filter(a => {
+        // Vinculado diretamente pela coluna turma_id
+        if (a.turma_id === turma?.id) return true
+        // Vinculado via tabela aluno_turmas (fallback para dados legados)
+        if (Array.isArray(a.aluno_turmas) && a.aluno_turmas.some(at => at.turma_id === turma?.id)) return true
+        return false
+      })
       .filter(a => {
         if (!buscaPresenca.trim()) return true
         return norm(buscaPresenca).split(/\s+/).filter(Boolean).every(p => norm(a.nome).includes(p))
@@ -406,7 +412,7 @@ export default function PoloDetalhe() {
 
   const { data: polos } = useSupabaseData('polos', '*')
   const { data: turmas, reload: reloadTurmas, loading: loadingTurmas } = useSupabaseData('turmas', '*, modalidades(nome,emoji), profiles(id,nome,cargo), polos(nome)')
-  const { data: alunos, reload: reloadAlunos } = useSupabaseData('alunos', 'id,nome,status,turma_id,data_nasc,data_matricula,cpf,telefone,telefone_emergencia,email,genero,foto_url')
+  const { data: alunos, reload: reloadAlunos } = useSupabaseData('alunos', 'id,nome,status,turma_id,data_nasc,data_matricula,cpf,telefone,telefone_emergencia,email,genero,foto_url,aluno_turmas(turma_id)')
   const { data: presencas, reload: reloadPresencas } = useSupabaseData('presencas', 'id,data,status,turma_id,aluno_id')
   const { data: atestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id')
   const { data: viagens, reload: reloadViagens } = useSupabaseData('viagens', '*, turmas(*, modalidades(nome,emoji))')
@@ -665,7 +671,10 @@ export default function PoloDetalhe() {
   // Os alertas visuais de atestado vencido/vencendo continuam ativos no card de KPIs.
 
   const turmaIds = useMemo(() => new Set(turmasPolo.map(t => t.id)), [turmasPolo])
-  const alunosPolo = useMemo(() => alunos.filter(a => turmaIds.has(a.turma_id)), [alunos, turmaIds])
+  const alunosPolo = useMemo(() => alunos.filter(a =>
+    turmaIds.has(a.turma_id) ||
+    (Array.isArray(a.aluno_turmas) && a.aluno_turmas.some(at => turmaIds.has(at.turma_id)))
+  ), [alunos, turmaIds])
   const alunoIds = useMemo(() => new Set(alunosPolo.map(a => a.id)), [alunosPolo])
   const presencasPolo = useMemo(() => presencas.filter(p => turmaIds.has(p.turma_id)), [presencas, turmaIds])
 
