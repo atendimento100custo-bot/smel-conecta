@@ -341,40 +341,36 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
                     </div>
                   )
                 }
-                {(() => {
-                  const val = presencaMap[a.id]
-                  const isPresente = val === 'presente' || val === true
-                  const isJustificado = val === 'justificado'
-                  const isFalta = !val
-                  // Toggle: falta → presente → falta (justificado mantém até clicar para ir a presente)
-                  const nextVal = isPresente ? false : 'presente'
-                  return (
-                    <button
-                      key={a.id}
-                      onClick={() => setPresencaMap(m => ({ ...m, [a.id]: nextVal }))}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
-                        isJustificado
-                          ? 'bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-700'
-                          : isPresente
-                          ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-700'
-                          : 'bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800'
-                      }`}
-                    >
-                      {isJustificado
-                        ? <CheckCircle2 size={16} className="text-amber-500 flex-shrink-0" />
+                const val = presencaMap[a.id]
+                const isPresente = val === 'presente' || val === true
+                const isJustificado = val === 'justificado'
+                const nextVal = isPresente ? false : 'presente'
+                return (
+                  <button
+                    key={a.id}
+                    onClick={() => setPresencaMap(m => ({ ...m, [a.id]: nextVal }))}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                      isJustificado
+                        ? 'bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-700'
                         : isPresente
-                        ? <CheckCircle2 size={16} className="text-primary-600 flex-shrink-0" />
-                        : <Circle size={16} className="text-red-400 flex-shrink-0" />}
-                      <div className="w-6 h-6 rounded-full bg-primary-600 flex items-center justify-center flex-shrink-0">
-                        <span className="text-white text-[9px] font-bold">{a.nome?.charAt(0)}</span>
-                      </div>
-                      <span className="text-xs font-medium text-navy-900 dark:text-white text-left">{a.nome}</span>
-                      <span className={`ml-auto text-[10px] font-semibold ${isJustificado ? 'text-amber-500' : isPresente ? 'text-primary-600' : 'text-red-400'}`}>
-                        {isJustificado ? 'Justificado' : isPresente ? 'Presente' : 'Falta'}
-                      </span>
-                    </button>
-                  )
-                })()}
+                        ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-700'
+                        : 'bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800'
+                    }`}
+                  >
+                    {isJustificado
+                      ? <CheckCircle2 size={16} className="text-amber-500 flex-shrink-0" />
+                      : isPresente
+                      ? <CheckCircle2 size={16} className="text-primary-600 flex-shrink-0" />
+                      : <Circle size={16} className="text-red-400 flex-shrink-0" />}
+                    <div className="w-6 h-6 rounded-full bg-primary-600 flex items-center justify-center flex-shrink-0">
+                      <span className="text-white text-[9px] font-bold">{a.nome?.charAt(0)}</span>
+                    </div>
+                    <span className="text-xs font-medium text-navy-900 dark:text-white text-left">{a.nome}</span>
+                    <span className={`ml-auto text-[10px] font-semibold ${isJustificado ? 'text-amber-500' : isPresente ? 'text-primary-600' : 'text-red-400'}`}>
+                      {isJustificado ? 'Justificado' : isPresente ? 'Presente' : 'Falta'}
+                    </span>
+                  </button>
+                )
               })}
             </div>
           )}
