@@ -1,6 +1,7 @@
 // src/pages/PoloDetalhe.jsx
 import { logAcao } from '../lib/auditLog'
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useCallback } from 'react'
+import { useToast } from '../components/ui/Toast'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useSupabaseData } from '../hooks/useSupabaseData'
 import { useAuth } from '../hooks/useAuth'
@@ -15,7 +16,7 @@ import {
   ArrowLeft, MapPin, Users, BookOpen, Clock, Stethoscope,
   TrendingUp, UserCheck, CheckCircle2, Circle, Camera,
   Bus, Star, Save, ChevronRight, Trophy, Plus, UserPlus,
-  Pencil, Trash2, Search, Filter, Upload, X
+  Pencil, Trash2, Search, Filter, Upload, X, Eye
 } from 'lucide-react'
 import { NovoFuncionarioModal, EditarFuncionarioModal, salvarVinculos } from './Equipes'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
@@ -80,26 +81,35 @@ function TabBtn({ active, onClick, children }) {
 }
 
 // ─── Aula Modal (presença + registro) ────────────────────────────────────────
-function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved }) {
+function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved, adminMode = false }) {
   const { profile } = useAuth()
   const [presencaMap, setPresencaMap] = useState({})
   const [registro, setRegistro] = useState({ conteudo: '', ocorrencias: '' })
-  const [fotos, setFotos] = useState([]) // URLs
+  const [fotos, setFotos] = useState([])
   const [uploadingFoto, setUploadingFoto] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [saveMsg, setSaveMsg] = useState(null)   // { tipo: 'sucesso'|'erro', texto: string }
   const [buscaPresenca, setBuscaPresenca] = useState('')
+  const { showToast: showAulaToast, toastEl: aulaToastEl } = useToast()
+
+  // Chamada — controla se a aula foi iniciada (libera lista de presença)
+  const [chamada, setChamada] = useState(null)      // null = não existe | objeto = criada
+  const [carregandoChamada, setCarregandoChamada] = useState(false)
+  const [iniciando, setIniciando] = useState(false)
 
   const dataHoje = new Date().toISOString().split('T')[0]
 
-  // Janela de presença: disponível 10min antes do início até 30min após o término
+  // Janela de presença:
+  // - Disponível a partir de 10min antes do início até qualquer hora do mesmo dia
+  // - Nunca bloqueia no meio do dia (isLocked desativado)
+  // - adminMode ignora a trava de "ainda não disponível"
   const [h, m] = (turma?.horario || '00:00').split(':').map(Number)
   const startMins = h * 60 + m
   const duracaoMin = turma?.duracao_min || 60
-  const endMins = startMins + duracaoMin
   const nowMins = new Date().getHours() * 60 + new Date().getMinutes()
-  const notYetAvailable = nowMins < startMins - 10
-  const isLocked = nowMins > endMins + 30
+  const notYetAvailable = adminMode ? false : nowMins < startMins - 10
+  const isLocked = false  // nunca bloqueia no mesmo dia — professor pode registrar até meia-noite
 
   const alunosTurma = useMemo(() => {
     const norm = (s) => (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
@@ -123,10 +133,18 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
       })
   }, [alunos, turma, buscaPresenca])
 
+  // Carrega chamada existente ao abrir o modal
+  useEffect(() => {
+    if (!turma || !open) { setChamada(null); return }
+    setCarregandoChamada(true)
+    supabase.from('chamadas').select('*')
+      .eq('turma_id', turma.id).eq('data', dataHoje).maybeSingle()
+      .then(({ data }) => { setChamada(data ?? null); setCarregandoChamada(false) })
+  }, [turma?.id, open])
+
   useEffect(() => {
     if (!turma || !open) return
     // Init presença (use existing if any, else default all absent)
-    // Preserva status: 'presente' | 'justificado' | 'falta' (false = falta)
     const existentes = presencas.filter(p => p.turma_id === turma.id && p.data === dataHoje)
     const map = {}
     alunosTurma.forEach(a => {
@@ -141,6 +159,29 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
     setFotos(reg?.fotos ?? [])
     setSaved(false)
   }, [turma, open])
+
+  // Inicia a aula — cria registro na tabela chamadas
+  async function iniciarAula() {
+    if (!turma || !profile) return
+    setIniciando(true)
+    const { data, error } = await supabase.from('chamadas')
+      .insert({ turma_id: turma.id, data: dataHoje, iniciada_por: profile.id })
+      .select('*').single()
+    if (!error && data) {
+      setChamada(data)
+      logAcao({
+        acao: 'iniciar_chamada',
+        perfil: profile,
+        turma,
+        detalhes: `Chamada iniciada às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
+      })
+    } else if (error?.code === '23505') {
+      const { data: ex } = await supabase.from('chamadas').select('*')
+        .eq('turma_id', turma.id).eq('data', dataHoje).single()
+      if (ex) setChamada(ex)
+    }
+    setIniciando(false)
+  }
 
   async function salvarPresenca() {
     // Re-fetch IDs existentes antes de salvar para evitar sobrescrita concorrente
@@ -166,15 +207,17 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
         toInsert.push({ turma_id: turma.id, aluno_id, data: dataHoje, status })
       }
     })
-    await Promise.all([
+    const results = await Promise.all([
       ...toUpdate.map(r => supabase.from('presencas').update({ status: r.status }).eq('id', r.id)),
       toInsert.length ? supabase.from('presencas').insert(toInsert) : Promise.resolve(),
     ])
+    const firstErr = results.find(r => r?.error)?.error
+    if (firstErr) throw firstErr
   }
 
   async function salvarRegistro() {
     const presentesCount = Object.values(presencaMap).filter(Boolean).length
-    await supabase.from('registros_aula').upsert({
+    const { error } = await supabase.from('registros_aula').upsert({
       turma_id: turma.id,
       data: dataHoje,
       conteudo: registro.conteudo,
@@ -183,17 +226,69 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
       professor_id: profile?.id ?? null,
       fotos: fotos.length > 0 ? fotos : null,
     }, { onConflict: 'turma_id,data' })
+    if (error) throw error
   }
 
   async function salvarAula() {
     if (isLocked || notYetAvailable) return
     setSaving(true)
-    await salvarPresenca()
-    await salvarRegistro()
-    setSaving(false)
-    setSaved(true)
-    onSaved?.()
-    setTimeout(() => setSaved(false), 2000)
+    setSaveMsg(null)
+    try {
+      await salvarPresenca()
+      await salvarRegistro()
+
+      // Calcula frequência
+      const alunosAtivos   = alunosTurma.filter(a => a.status === 'Ativo')
+      const totalPresentes = Object.values(presencaMap).filter(v => v === 'presente' || v === true).length
+      const totalJustif    = Object.values(presencaMap).filter(v => v === 'justificado').length
+      const totalAtivos    = alunosAtivos.length
+      const freq = totalAtivos > 0
+        ? Math.round(((totalPresentes + totalJustif) / totalAtivos) * 100) : 0
+      const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+
+      if (chamada?.id) {
+        const { data: updChamada } = await supabase.from('chamadas')
+          .update({ frequencia_pct: freq, total_presentes: totalPresentes, total_alunos: totalAtivos })
+          .eq('id', chamada.id).select('*').single()
+        if (updChamada) setChamada(updChamada)
+      }
+
+      logAcao({
+        acao: 'registro_presenca',
+        perfil: profile,
+        turma,
+        detalhes: `${totalPresentes}P ${totalJustif > 0 ? totalJustif + 'J ' : ''}/ ${totalAtivos} — ${freq}% · ${dataHoje} · ${agora}`,
+      })
+
+      setSaving(false)
+      setSaved(true)
+      setSaveMsg({
+        tipo: 'sucesso',
+        texto: `✅ Presença salva às ${agora} — ${totalPresentes} presente${totalPresentes !== 1 ? 's' : ''} · ${freq}% de frequência`,
+      })
+      onSaved?.()
+      setTimeout(() => setSaved(false), 3000)
+    } catch (erro) {
+      setSaving(false)
+      // Mensagem amigável — sem linguagem técnica
+      let msgAmigavel = 'Não conseguimos salvar. Verifique sua internet e tente de novo.'
+      if (erro?.code === '42501') {
+        msgAmigavel = 'Você não tem acesso para registrar presença nessa turma. Fale com seu coordenador para verificar seu vínculo.'
+      } else if (erro?.code === '23505' || erro?.message?.includes('unique')) {
+        msgAmigavel = 'Já existe um registro de presença para essa aula hoje. Se precisar corrigir, use a página de Presença.'
+      } else if (erro?.code?.startsWith('PGRST') || erro?.message?.includes('network') || erro?.message?.includes('fetch')) {
+        msgAmigavel = 'Problema de conexão com o servidor. Verifique sua internet e tente novamente.'
+      } else if (erro?.message) {
+        msgAmigavel = `Não foi possível salvar. Tente de novo. Se o problema continuar, avise o Pedro. (Detalhe: ${erro.message.slice(0, 60)})`
+      }
+      setSaveMsg({ tipo: 'erro', texto: msgAmigavel })
+      logAcao({
+        acao: 'registro_presenca',
+        perfil: profile,
+        turma,
+        detalhes: `ERRO · ${dataHoje} · ${erro?.code ?? ''} · ${erro?.message?.slice(0, 100) ?? 'desconhecido'}`,
+      })
+    }
   }
 
   async function handleFotoUpload(e) {
@@ -222,7 +317,14 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
     <Modal open={open} onClose={onClose} size="lg"
       title={`${turma.modalidades?.emoji ?? '📚'} ${turma.modalidades?.nome ?? 'Turma'} · ${turma.dias?.join(', ') ?? ''} · ${turma.horario?.slice(0,5) ?? ''}`}
     >
+      {aulaToastEl}
       <div className="space-y-4">
+        {/* Banner modo admin/teste */}
+        {adminMode && (
+          <div className="bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-700 rounded-lg px-3 py-2 text-xs text-violet-700 dark:text-violet-300 font-medium flex items-center gap-2">
+            <Eye size={12}/> Modo admin — trava de horário desativada para teste
+          </div>
+        )}
         {/* Banners de disponibilidade */}
         {notYetAvailable && (
           <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg px-3 py-2 text-xs text-blue-700 dark:text-blue-300 font-medium">
@@ -293,94 +395,166 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
           </div>
         </div>
 
-        {/* Divisor: Lista de Presença */}
+        {/* ── Divisor: Lista de Presença ── */}
         <div>
           <div className="flex items-center gap-3 mb-3">
             <div className="flex-1 h-px bg-slate-200 dark:bg-navy-600" />
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">Lista de Presença</span>
-              <span className="text-[10px] font-semibold text-primary-600">{presentes + justificados} freq. ({presentes}P {justificados > 0 ? `${justificados}J ` : ''}/ {total})</span>
+              {chamada && <span className="text-[10px] font-semibold text-primary-600">{presentes + justificados} freq. ({presentes}P {justificados > 0 ? `${justificados}J ` : ''}/ {total})</span>}
             </div>
             <div className="flex-1 h-px bg-slate-200 dark:bg-navy-600" />
           </div>
-          <div className="flex gap-2 mb-3 flex-wrap">
-            <input
-              type="text"
-              placeholder="Buscar aluno..."
-              value={buscaPresenca}
-              onChange={e => setBuscaPresenca(e.target.value)}
-              className="flex-1 min-w-32 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-navy-600 bg-white dark:bg-navy-700 focus:outline-none focus:ring-1 focus:ring-primary-500"
-            />
-            <button onClick={() => setPresencaMap(m => Object.fromEntries(Object.keys(m).map(k => [k, true])))}
-              className="text-[10px] font-semibold text-primary-600 hover:text-primary-700 px-2 py-0.5 rounded border border-primary-200 dark:border-primary-700">Todos</button>
-            <button onClick={() => setPresencaMap(m => Object.fromEntries(Object.keys(m).map(k => [k, false])))}
-              className="text-[10px] font-semibold text-red-500 hover:text-red-600 px-2 py-0.5 rounded border border-red-200 dark:border-red-800">Nenhum</button>
-          </div>
 
-          {alunosTurma.length === 0 ? (
-            <div className="py-6 text-center text-sm text-slate-400">{buscaPresenca ? 'Nenhum aluno encontrado.' : 'Nenhum aluno nesta turma.'}</div>
-          ) : (
-            <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
-              {alunosTurma.map(a => {
-                const ativo = a.status === 'Ativo'
-                if (!ativo) {
-                  return (
-                    <div key={a.id} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-50 dark:bg-navy-900/40 border border-slate-200 dark:border-navy-700 opacity-60">
-                      <Circle size={16} className="text-slate-300 flex-shrink-0" />
-                      <div className="w-6 h-6 rounded-full bg-slate-300 dark:bg-navy-600 flex items-center justify-center flex-shrink-0">
-                        <span className="text-white text-[9px] font-bold">{a.nome?.charAt(0)}</span>
-                      </div>
-                      <span className="text-xs font-medium text-slate-400 dark:text-slate-500 text-left flex-1 truncate">{a.nome}</span>
-                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border flex-shrink-0 ${
-                        a.status === 'Transferido'
-                          ? 'text-amber-700 bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-700 dark:text-amber-400'
-                          : 'text-slate-500 bg-slate-100 border-slate-200 dark:bg-navy-700 dark:border-navy-600 dark:text-slate-400'
-                      }`}>
-                        {a.status}
-                      </span>
-                    </div>
-                  )
-                }
-                const val = presencaMap[a.id]
-                const isPresente = val === 'presente' || val === true
-                const isJustificado = val === 'justificado'
-                const nextVal = isPresente ? false : 'presente'
-                return (
-                  <button
-                    key={a.id}
-                    onClick={() => setPresencaMap(m => ({ ...m, [a.id]: nextVal }))}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
-                      isJustificado
-                        ? 'bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-700'
-                        : isPresente
-                        ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-700'
-                        : 'bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800'
-                    }`}
-                  >
-                    {isJustificado
-                      ? <CheckCircle2 size={16} className="text-amber-500 flex-shrink-0" />
-                      : isPresente
-                      ? <CheckCircle2 size={16} className="text-primary-600 flex-shrink-0" />
-                      : <Circle size={16} className="text-red-400 flex-shrink-0" />}
-                    <div className="w-6 h-6 rounded-full bg-primary-600 flex items-center justify-center flex-shrink-0">
-                      <span className="text-white text-[9px] font-bold">{a.nome?.charAt(0)}</span>
-                    </div>
-                    <span className="text-xs font-medium text-navy-900 dark:text-white text-left">{a.nome}</span>
-                    <span className={`ml-auto text-[10px] font-semibold ${isJustificado ? 'text-amber-500' : isPresente ? 'text-primary-600' : 'text-red-400'}`}>
-                      {isJustificado ? 'Justificado' : isPresente ? 'Presente' : 'Falta'}
-                    </span>
-                  </button>
-                )
-              })}
+          {/* ── Estado: carregando chamada ── */}
+          {carregandoChamada ? (
+            <div className="py-4 text-center text-xs text-slate-400">Verificando chamada…</div>
+
+          /* ── Estado: chamada NÃO iniciada → mostrar botão Iniciar Aula ── */
+          ) : !chamada && !isLocked ? (
+            <div className="flex flex-col items-center gap-3 py-6 bg-slate-50 dark:bg-navy-900/30 rounded-xl border border-slate-200 dark:border-navy-700">
+              <div className="text-3xl">▶️</div>
+              <div className="text-center">
+                <p className="text-sm font-bold text-navy-900 dark:text-white">Iniciar Aula</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-xs">
+                  Clique em <strong>Iniciar Aula</strong> para liberar a lista de presença.<br/>
+                  Se não houver aula hoje, não inicie — os alunos não ficam com falta.
+                </p>
+              </div>
+              <Button size="sm" onClick={iniciarAula} disabled={iniciando || notYetAvailable}>
+                {iniciando ? 'Iniciando…' : '▶ Iniciar Aula'}
+              </Button>
+              {notYetAvailable && (
+                <p className="text-[10px] text-slate-400">
+                  Disponível às {String(Math.floor((startMins - 10) / 60)).padStart(2,'0')}:{String((startMins - 10) % 60).padStart(2,'0')}
+                </p>
+              )}
             </div>
-          )}
+
+          /* ── Estado: aula iniciada → mostrar lista editável ── */
+          ) : chamada ? (
+            <>
+              {/* Banner: aula iniciada */}
+              <div className="mb-3 px-3 py-2 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-700 rounded-lg text-xs text-primary-700 dark:text-primary-400 font-medium flex items-center gap-2">
+                <CheckCircle2 size={12} />
+                Aula iniciada às {new Date(chamada.iniciada_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                {chamada.frequencia_pct != null && ` · ${chamada.frequencia_pct}% frequência`}
+              </div>
+
+              {/* Legenda de cores */}
+              <div className="mb-2 flex items-center gap-3 text-[10px] text-slate-500">
+                <span className="flex items-center gap-1"><CheckCircle2 size={11} className="text-primary-600"/>Presente</span>
+                <span className="flex items-center gap-1"><CheckCircle2 size={11} className="text-amber-500"/>Justificada</span>
+                <span className="flex items-center gap-1"><Circle size={11} className="text-red-400"/>Falta</span>
+                <span className="ml-auto text-[9px] text-slate-400">Toque para alternar →</span>
+              </div>
+
+              <div className="flex gap-2 mb-3 flex-wrap">
+                <input
+                  type="text"
+                  placeholder="Buscar aluno..."
+                  value={buscaPresenca}
+                  onChange={e => setBuscaPresenca(e.target.value)}
+                  className="flex-1 min-w-32 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-navy-600 bg-white dark:bg-navy-700 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                />
+                <button onClick={() => setPresencaMap(m => Object.fromEntries(Object.keys(m).map(k => [k, 'presente'])))}
+                  className="text-[10px] font-semibold text-primary-600 hover:text-primary-700 px-2 py-0.5 rounded border border-primary-200 dark:border-primary-700">Todos</button>
+                <button onClick={() => setPresencaMap(m => Object.fromEntries(Object.keys(m).map(k => [k, false])))}
+                  className="text-[10px] font-semibold text-red-500 hover:text-red-600 px-2 py-0.5 rounded border border-red-200 dark:border-red-800">Nenhum</button>
+              </div>
+
+              {alunosTurma.length === 0 ? (
+                <div className="py-6 text-center text-sm text-slate-400">{buscaPresenca ? 'Nenhum aluno encontrado.' : 'Nenhum aluno nesta turma.'}</div>
+              ) : (
+                <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
+                  {alunosTurma.map(a => {
+                    const ativo = a.status === 'Ativo'
+                    if (!ativo) {
+                      return (
+                        <div key={a.id} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-50 dark:bg-navy-900/40 border border-slate-200 dark:border-navy-700 opacity-60">
+                          <Circle size={16} className="text-slate-300 flex-shrink-0" />
+                          <div className="w-6 h-6 rounded-full bg-slate-300 dark:bg-navy-600 flex items-center justify-center flex-shrink-0">
+                            <span className="text-white text-[9px] font-bold">{a.nome?.charAt(0)}</span>
+                          </div>
+                          <span className="text-xs font-medium text-slate-400 dark:text-slate-500 text-left flex-1 truncate">{a.nome}</span>
+                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border flex-shrink-0 ${
+                            a.status === 'Transferido'
+                              ? 'text-amber-700 bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-700 dark:text-amber-400'
+                              : 'text-slate-500 bg-slate-100 border-slate-200 dark:bg-navy-700 dark:border-navy-600 dark:text-slate-400'
+                          }`}>{a.status}</span>
+                        </div>
+                      )
+                    }
+                    const val = presencaMap[a.id]
+                    const isPresente = val === 'presente' || val === true
+                    const isJustificado = val === 'justificado'
+                    // Ciclo 3 estados: falta → presente → justificado → falta
+                    const nextVal = isJustificado ? false : isPresente ? 'justificado' : 'presente'
+                    return (
+                      <button
+                        key={a.id}
+                        disabled={isLocked}
+                        onClick={() => setPresencaMap(m => ({ ...m, [a.id]: nextVal }))}
+                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                          isJustificado
+                            ? 'bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-700'
+                            : isPresente
+                            ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-700'
+                            : 'bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800'
+                        }`}
+                      >
+                        {isJustificado
+                          ? <CheckCircle2 size={16} className="text-amber-500 flex-shrink-0" />
+                          : isPresente
+                          ? <CheckCircle2 size={16} className="text-primary-600 flex-shrink-0" />
+                          : <Circle size={16} className="text-red-400 flex-shrink-0" />}
+                        <div className="w-6 h-6 rounded-full bg-primary-600 flex items-center justify-center flex-shrink-0">
+                          <span className="text-white text-[9px] font-bold">{a.nome?.charAt(0)}</span>
+                        </div>
+                        <span className="text-xs font-medium text-navy-900 dark:text-white text-left flex-1">{a.nome}</span>
+                        <span className={`text-[10px] font-semibold ${isJustificado ? 'text-amber-500' : isPresente ? 'text-primary-600' : 'text-red-400'}`}>
+                          {isJustificado ? 'Justificada' : isPresente ? 'Presente' : 'Falta'}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </>
+          ) : null}
         </div>
 
-        {/* Botão único */}
-        {!isLocked && (
+        {/* Aviso: aula encerrada mas sem presença registrada */}
+        {!chamada && !carregandoChamada && nowMins > startMins + (turma?.duracao_min || 60) + 30 && (
+          <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-lg px-3 py-2.5 flex items-center gap-2">
+            <span className="text-lg">⚠️</span>
+            <div>
+              <p className="text-xs font-bold text-amber-800 dark:text-amber-300">Presença não registrada!</p>
+              <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                A aula já encerrou. Clique em <strong>Iniciar Aula</strong> acima e faça a chamada antes de sair.
+                Você tem até meia-noite de hoje para registrar.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Mensagem de sucesso ou erro após salvar */}
+        {saveMsg && (
+          <div className={`rounded-lg px-3 py-2.5 text-xs font-medium flex items-start gap-2 ${
+            saveMsg.tipo === 'sucesso'
+              ? 'bg-green-50 dark:bg-green-900/20 border border-green-300 dark:border-green-700 text-green-800 dark:text-green-300'
+              : 'bg-red-50 dark:bg-red-900/20 border border-red-300 dark:border-red-700 text-red-800 dark:text-red-300'
+          }`}>
+            <span className="text-base flex-shrink-0">{saveMsg.tipo === 'sucesso' ? '✅' : '❌'}</span>
+            <span>{saveMsg.texto}</span>
+          </div>
+        )}
+
+        {/* Botão Salvar — só aparece após iniciar aula */}
+        {!isLocked && chamada && (
           <div className="flex justify-end pt-1">
             <Button size="sm" onClick={salvarAula} disabled={saving}>
-              {saved ? <><CheckCircle2 size={13}/> Salvo!</> : saving ? 'Salvando...' : <><Save size={13}/> Salvar Aula</>}
+              {saved ? <><CheckCircle2 size={13}/> Salvo!</> : saving ? 'Salvando...' : <><Save size={13}/> Registrar Aula</>}
             </Button>
           </div>
         )}
@@ -402,6 +576,7 @@ export default function PoloDetalhe() {
   const { dark } = useTheme()
   const { isAdmin, isCoordenador, isProfessor, isEstagiario, profile } = useAuth()
   const { offline, pending, addToQueue } = useOfflineQueue()
+  const { showToast, toastEl } = useToast()
 
   const [tab, setTab] = useState('geral')
   const [aulaOpen, setAulaOpen] = useState(null)
@@ -622,7 +797,21 @@ export default function PoloDetalhe() {
   }
 
   const polo = polos.find(p => p.id === id)
-  const turmasPolo = useMemo(() => turmas.filter(t => t.polo_id === id), [turmas, id])
+  // ── Visualizar como (somente admin) ─────────────────────────────────────────
+  const [viewAs, setViewAs] = useState(null) // { id, nome, cargo } ou null
+  const [viewAsOpen, setViewAsOpen] = useState(false)
+
+  const viewAsTurmaIds = useMemo(() => {
+    if (!viewAs) return null
+    return new Set(atribuicoes.filter(a => a.usuario_id === viewAs.id && a.turma_id).map(a => a.turma_id))
+  }, [viewAs, atribuicoes])
+
+  const turmasPolo = useMemo(() => {
+    const base = turmas.filter(t => t.polo_id === id)
+    if (!viewAs || !viewAsTurmaIds) return base
+    if (viewAs.cargo === 'coordenador') return base // coordenador vê tudo do polo
+    return base.filter(t => viewAsTurmaIds.has(t.id))
+  }, [turmas, id, viewAs, viewAsTurmaIds])
 
   // canEditPolo: admin global OU qualquer staff deste polo
   const canEditPolo = useMemo(() => {
@@ -772,23 +961,16 @@ export default function PoloDetalhe() {
   const diaHoje = hoje.getDay()
   const aulasHoje = turmasPolo.filter(t => t.dias?.some(d => DIAS_JS[d] === diaHoje))
   const agoraMins = hoje.getHours() * 60 + hoje.getMinutes()
-  // Prioridade: turma em andamento > pós-janela; empate → a que começou mais recente
-  const aulaAgora = aulasHoje.reduce((best, t) => {
-    if (!t.horario) return best
+  // Todas as aulas acontecendo agora (janela: 30min antes até 30min após o término)
+  const aulasAgora = aulasHoje.filter(t => {
+    if (!t.horario) return false
     const [h, m] = t.horario.split(':').map(Number)
     const tMins = h * 60 + m
     const dur = t.duracao_min || 60
-    if (agoraMins < tMins - 30 || agoraMins > tMins + dur + 30) return best
-    if (!best) return t
-    const [bh, bm] = (best.horario || '00:00').split(':').map(Number)
-    const bMins = bh * 60 + bm
-    const bDur = best.duracao_min || 60
-    const tEmAula = agoraMins >= tMins && agoraMins <= tMins + dur
-    const bEmAula = agoraMins >= bMins && agoraMins <= bMins + bDur
-    if (tEmAula && !bEmAula) return t   // t está em aula, best não → t vence
-    if (!tEmAula && bEmAula) return best // best está em aula, t não → best vence
-    return tMins > bMins ? t : best     // ambas iguais → mais recente vence
-  }, null)
+    return agoraMins >= tMins - 30 && agoraMins <= tMins + dur + 30
+  }).sort((a, b) => (a.horario ?? '').localeCompare(b.horario ?? ''))
+  // Compat: mantém referência única para usos legados
+  const aulaAgora = aulasAgora[0] ?? null
 
   // Turmas Melhor Idade
   const turmasMelhorIdade = turmasPolo.filter(t => t.faixa === 'Melhor Idade')
@@ -945,21 +1127,32 @@ export default function PoloDetalhe() {
     setEditAlunoErrors(erros)
     if (Object.keys(erros).length > 0) return
     setSavingEditAluno(true)
-    await supabase.from('alunos').update({
-      nome: editAlunoForm.nome.trim(),
-      data_nasc: editAlunoForm.data_nasc || null,
-      cpf: editAlunoForm.cpf || null,
-      telefone: editAlunoForm.telefone || null,
-      telefone_emergencia: editAlunoForm.telefone_emergencia || null,
-      email: editAlunoForm.email || null,
-      turma_id: editAlunoForm.turma_id || null,
-      status: editAlunoForm.status,
-      genero: editAlunoForm.genero || null,
-      foto_url: editAlunoForm.foto_url || null,
-    }).eq('id', editAlunoId)
-    setSavingEditAluno(false)
-    setEditAlunoOpen(false)
-    reloadAlunos()
+    try {
+      const { error: saveErr } = await supabase.from('alunos').update({
+        nome: editAlunoForm.nome.trim(),
+        data_nasc: editAlunoForm.data_nasc || null,
+        cpf: editAlunoForm.cpf || null,
+        telefone: editAlunoForm.telefone || null,
+        telefone_emergencia: editAlunoForm.telefone_emergencia || null,
+        email: editAlunoForm.email || null,
+        turma_id: editAlunoForm.turma_id || null,
+        status: editAlunoForm.status,
+        genero: editAlunoForm.genero || null,
+        foto_url: editAlunoForm.foto_url || null,
+      }).eq('id', editAlunoId)
+      if (saveErr) throw saveErr
+      setSavingEditAluno(false)
+      setEditAlunoOpen(false)
+      reloadAlunos()
+    } catch (erro) {
+      setSavingEditAluno(false)
+      const msg = erro?.code === '42501'
+        ? 'Você não tem permissão para editar esse aluno. Peça ao coordenador para verificar seu acesso ao polo.'
+        : erro?.code === '23505'
+        ? 'Esse CPF já está cadastrado. Pesquise o nome do aluno antes de cadastrar novamente.'
+        : `Erro inesperado ao salvar. Tente novamente ou avise o suporte: ${erro?.message ?? ''}`
+      showToast(msg, 'error')
+    }
   }
 
   async function deletarAluno() {
@@ -1059,6 +1252,8 @@ export default function PoloDetalhe() {
         setSavingAluno(false)
         setNovoAlunoOpen(false)
         setNovoAlunoForm(EMPTY_ALUNO)
+        reloadAlunos() // atualiza lista imediatamente para evitar duplicatas
+        showToast(`✅ Aluno "${novoAlunoForm.nome.trim()}" cadastrado com sucesso!`, 'success')
       }
     } catch (erro) {
       if (offline || !navigator.onLine) {
@@ -1069,7 +1264,12 @@ export default function PoloDetalhe() {
       } else {
         console.error('Erro ao salvar aluno:', erro)
         setSavingAluno(false)
-        setNovoAlunoError('Erro inesperado ao salvar. Tente novamente.')
+        const msg = erro?.code === '42501'
+          ? 'Você não tem permissão para cadastrar alunos nessa turma. Peça ao coordenador para verificar se você está vinculado a ela.'
+          : erro?.code === '23505'
+          ? 'Esse CPF já está cadastrado. Pesquise o nome do aluno antes de cadastrar novamente.'
+          : `Erro inesperado ao salvar. Tente novamente ou avise o suporte: ${erro?.message ?? ''}`
+        setNovoAlunoError(msg)
       }
     }
   }
@@ -1090,6 +1290,7 @@ export default function PoloDetalhe() {
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
+      {toastEl}
       <Topbar
         title={polo?.nome ?? 'Carregando...'}
         action={
@@ -1103,6 +1304,17 @@ export default function PoloDetalhe() {
         <div className="bg-amber-50 dark:bg-amber-900/20 border-t border-amber-200 dark:border-amber-800/50 px-3 md:px-5 py-2 flex items-center gap-2 text-xs font-medium text-amber-700 dark:text-amber-300">
           <Circle size={8} className="fill-current" />
           Offline · {pending} registros pendentes
+        </div>
+      )}
+
+      {/* Banner: modo "Visualizar como" */}
+      {viewAs && (
+        <div className="bg-violet-50 dark:bg-violet-900/20 border-b border-violet-200 dark:border-violet-700 px-3 md:px-5 py-2 flex items-center gap-2 text-xs font-medium text-violet-700 dark:text-violet-300">
+          <Eye size={13} className="flex-shrink-0" />
+          <span>Visualizando como <strong>{viewAs.nome}</strong> · {viewAs.cargo}</span>
+          <button onClick={() => setViewAs(null)} className="ml-auto flex items-center gap-1 opacity-70 hover:opacity-100 transition-opacity">
+            <X size={12}/> Sair
+          </button>
         </div>
       )}
 
@@ -1121,16 +1333,23 @@ export default function PoloDetalhe() {
               <p className="text-xs text-slate-400 dark:text-slate-500">{polo.tipo}{polo.bairro ? ` · ${polo.bairro}` : ''}</p>
               {polo.endereco && <p className="text-[11px] text-slate-400 dark:text-slate-500">{polo.endereco}</p>}
             </div>
-            {canEditPolo && (
-              <div className="flex gap-2">
-                <Button size="sm" variant="secondary" onClick={openNovoFunc}>
-                  <UserPlus size={13}/> <span className="hidden sm:inline">Novo Funcionário</span>
+            <div className="flex gap-2">
+              {isAdmin && (
+                <Button size="sm" variant="secondary" onClick={() => setViewAsOpen(true)} title="Simular visão de outro usuário">
+                  <Eye size={13}/> <span className="hidden sm:inline">Ver como</span>
                 </Button>
-                <Button size="sm" onClick={() => { setNovoAlunoForm(EMPTY_ALUNO); setFiltroModalidadeAluno(''); setNovoAlunoOpen(true) }}>
-                  <Plus size={13}/> <span className="hidden sm:inline">Novo Aluno</span>
-                </Button>
-              </div>
-            )}
+              )}
+              {canEditPolo && (
+                <>
+                  <Button size="sm" variant="secondary" onClick={openNovoFunc}>
+                    <UserPlus size={13}/> <span className="hidden sm:inline">Novo Funcionário</span>
+                  </Button>
+                  <Button size="sm" onClick={() => { setNovoAlunoForm(EMPTY_ALUNO); setFiltroModalidadeAluno(''); setNovoAlunoOpen(true) }}>
+                    <Plus size={13}/> <span className="hidden sm:inline">Novo Aluno</span>
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         )}
 
@@ -1316,30 +1535,87 @@ export default function PoloDetalhe() {
                 </Button>
               </div>
             )}
-            {/* Aula agora */}
-            {aulaAgora && (
-              <div className="bg-gradient-to-r from-primary-700 to-primary-500 rounded-xl p-4 text-white">
-                <div className="flex items-center gap-2 mb-1">
-                  <div className="w-2 h-2 rounded-full bg-white animate-pulse" />
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-primary-100">Aula Acontecendo Agora</p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-3xl">{aulaAgora.modalidades?.emoji ?? '🏃'}</span>
-                  <div className="flex-1">
-                    <p className="text-sm font-bold">{aulaAgora.modalidades?.nome ?? '—'}</p>
-                    <p className="text-xs text-primary-100">{aulaAgora.faixa} · {aulaAgora.dias?.join(', ')} · {aulaAgora.horario?.slice(0,5)}</p>
-                    {aulaAgora.profiles && <p className="text-xs text-primary-200">{aulaAgora.profiles.nome}</p>}
+            {/* Aulas acontecendo agora — classifica cada uma por status */}
+            {aulasAgora.length > 0 && (() => {
+              // Classifica cada turma: 'em_aula' | 'tolerancia' | 'pre'
+              const classificar = (t) => {
+                const [h, m] = t.horario.split(':').map(Number)
+                const tMins = h * 60 + m
+                const dur = t.duracao_min || 60
+                if (agoraMins < tMins) return { tipo: 'pre', minRestantes: tMins - agoraMins }
+                if (agoraMins <= tMins + dur) return { tipo: 'em_aula', minRestantes: tMins + dur - agoraMins }
+                return { tipo: 'tolerancia', minRestantes: tMins + dur + 30 - agoraMins }
+              }
+              const emAula = aulasAgora.filter(t => classificar(t).tipo === 'em_aula')
+              const tolerancia = aulasAgora.filter(t => classificar(t).tipo === 'tolerancia')
+              const pre = aulasAgora.filter(t => classificar(t).tipo === 'pre')
+
+              const CardAula = ({ t, tipo }) => {
+                const { minRestantes } = classificar(t)
+                const isGreen = tipo === 'em_aula'
+                const isAmber = tipo === 'tolerancia'
+                return (
+                  <div className={`flex items-center gap-3 rounded-lg px-3 py-2 ${isGreen ? 'bg-green-700' : ''}`}>
+                    <span className="text-xl flex-shrink-0">{t.modalidades?.emoji ?? '🏃'}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-bold truncate ${isGreen ? 'text-white' : isAmber ? 'text-amber-800 dark:text-amber-200' : 'text-blue-700 dark:text-blue-300'}`}>
+                        {t.modalidades?.nome ?? '—'}
+                      </p>
+                      <p className={`text-xs truncate ${isGreen ? 'text-green-100' : isAmber ? 'text-amber-600 dark:text-amber-400' : 'text-blue-500 dark:text-blue-400'}`}>
+                        {t.faixa} · {t.horario?.slice(0,5)}{t.profiles?.nome ? ` · ${t.profiles.nome}` : ''}
+                        {isAmber && ` · fecha em ${minRestantes} min`}
+                        {tipo === 'pre' && ` · começa em ${minRestantes} min`}
+                      </p>
+                    </div>
+                    <Button size="sm" onClick={() => setAulaOpen(t)}
+                      className={`flex-shrink-0 border-0 font-bold text-xs ${
+                        isGreen ? 'bg-white text-green-700 hover:bg-green-50' :
+                        isAmber ? 'bg-amber-500 text-white hover:bg-amber-600' :
+                                  'bg-blue-500 text-white hover:bg-blue-600'
+                      }`}>
+                      Registrar
+                    </Button>
                   </div>
-                  <Button
-                    size="sm"
-                    onClick={() => setAulaOpen(aulaAgora)}
-                    className="bg-white text-primary-700 hover:bg-primary-50 border-0"
-                  >
-                    Registrar Aula
-                  </Button>
+                )
+              }
+
+              return (
+                <div className="space-y-2">
+                  {/* 🟢 Em aula agora — DESTAQUE PRINCIPAL */}
+                  {emAula.length > 0 && (
+                    <div className="bg-green-600 rounded-xl p-4 space-y-2">
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-green-100">
+                          {emAula.length === 1 ? 'Em Aula Agora' : `${emAula.length} Aulas Acontecendo Agora`}
+                        </p>
+                      </div>
+                      {emAula.map(t => <CardAula key={t.id} t={t} tipo="em_aula" />)}
+                    </div>
+                  )}
+
+                  {/* 🟠 Janela de tolerância — compacto, menos destaque */}
+                  {tolerancia.length > 0 && (
+                    <div className="bg-amber-100 dark:bg-amber-900 border border-amber-300 dark:border-amber-700 rounded-xl px-3 py-2.5 space-y-1.5">
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-amber-700 dark:text-amber-300 flex items-center gap-1">
+                        ⏱ Janela de tolerância — aula encerrou, ainda pode registrar
+                      </p>
+                      {tolerancia.map(t => <CardAula key={t.id} t={t} tipo="tolerancia" />)}
+                    </div>
+                  )}
+
+                  {/* 🔵 Iniciando em breve — ainda mais discreto */}
+                  {pre.length > 0 && (
+                    <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-xl px-3 py-2.5 space-y-1.5">
+                      <p className="text-[9px] font-bold uppercase tracking-widest text-blue-500 dark:text-blue-400 flex items-center gap-1">
+                        🕐 Iniciando em breve
+                      </p>
+                      {pre.map(t => <CardAula key={t.id} t={t} tipo="pre" />)}
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
+              )
+            })()}
 
             {/* Aulas de hoje */}
             <div>
@@ -1353,40 +1629,74 @@ export default function PoloDetalhe() {
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {aulasHoje.map(t => {
-                    const isAgora = (() => {
-                      if (!t.horario) return false
+                    const cardStatus = (() => {
+                      if (!t.horario) return 'normal'
                       const [th, tm] = t.horario.split(':').map(Number)
                       const tM = th * 60 + tm
-                      return agoraMins >= tM - 30 && agoraMins <= tM + (t.duracao_min || 60) + 30
+                      const dur = t.duracao_min || 60
+                      if (agoraMins >= tM && agoraMins <= tM + dur) return 'em_aula'
+                      if (agoraMins > tM + dur && agoraMins <= tM + dur + 30) return 'tolerancia'
+                      if (agoraMins >= tM - 30 && agoraMins < tM) return 'pre'
+                      // Aula já encerrou (mais de 30min) — pendente se não registrou
+                      if (agoraMins > tM + dur + 30) return 'pendente'
+                      return 'normal'
                     })()
-                    const alunosTurma = alunos.filter(a => a.turma_id === t.id && a.status === 'Ativo').length
-                    const presencaHoje = presencas.filter(p => p.turma_id === t.id && p.data === new Date().toISOString().split('T')[0])
+                    const alunosTurmaCount = alunos.filter(a => a.turma_id === t.id && a.status === 'Ativo').length
+                    const dataHoje = new Date().toISOString().split('T')[0]
+                    const presencaHoje = presencas.filter(p => p.turma_id === t.id && p.data === dataHoje)
                     const jaRegistrou = presencaHoje.length > 0
-                    const registroHoje = registros.find(r => r.turma_id === t.id && r.data === new Date().toISOString().split('T')[0])
+                    const registroHoje = registros.find(r => r.turma_id === t.id && r.data === dataHoje)
+
+                    // 'pendente' = aula encerrada sem presença registrada
+                    const isPendente = cardStatus === 'pendente' && !jaRegistrou
+                    const cardCls =
+                      cardStatus === 'em_aula'    ? 'bg-green-600 border-green-500 text-white' :
+                      cardStatus === 'tolerancia' ? 'bg-amber-50 dark:bg-amber-950 border-amber-300 dark:border-amber-700' :
+                      cardStatus === 'pre'        ? 'bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800' :
+                      isPendente                  ? 'bg-red-50 dark:bg-red-950 border-red-300 dark:border-red-700' :
+                                                    'bg-white dark:bg-navy-800 border-slate-200 dark:border-navy-700 hover:border-primary-200'
+                    const titleCls =
+                      cardStatus === 'em_aula'    ? 'text-white' :
+                      cardStatus === 'tolerancia' ? 'text-amber-900 dark:text-amber-100' :
+                      cardStatus === 'pre'        ? 'text-blue-800 dark:text-blue-200' :
+                      isPendente                  ? 'text-red-800 dark:text-red-200' :
+                                                    'text-navy-900 dark:text-white'
+                    const subCls =
+                      cardStatus === 'em_aula'    ? 'text-green-100' :
+                      cardStatus === 'tolerancia' ? 'text-amber-600 dark:text-amber-400' :
+                      cardStatus === 'pre'        ? 'text-blue-500 dark:text-blue-400' :
+                      isPendente                  ? 'text-red-500 dark:text-red-400' :
+                                                    'text-slate-400 dark:text-slate-500'
+                    const badgeEl =
+                      cardStatus === 'em_aula'    ? <span className="text-[8px] bg-white text-green-700 px-1.5 py-0.5 rounded-full font-bold shrink-0">AGORA</span> :
+                      cardStatus === 'tolerancia' ? <span className="text-[8px] bg-amber-400 text-amber-900 px-1.5 py-0.5 rounded-full font-bold shrink-0">⏱</span> :
+                      cardStatus === 'pre'        ? <span className="text-[8px] bg-blue-400 text-white px-1.5 py-0.5 rounded-full font-bold shrink-0">EM BREVE</span> :
+                      isPendente                  ? <span className="text-[8px] bg-red-500 text-white px-1.5 py-0.5 rounded-full font-bold shrink-0">⚠️ PENDENTE</span> :
+                                                    null
+                    const checkColor = cardStatus === 'em_aula' ? 'text-green-100' : 'text-primary-600'
                     return (
                       <button key={t.id} onClick={() => setAulaOpen(t)}
-                        className={`text-left p-3 rounded-xl border transition-all ${
-                          isAgora ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700'
-                            : 'bg-white dark:bg-navy-800 border-slate-200 dark:border-navy-700 hover:border-primary-200 dark:hover:border-primary-700'
-                        }`}>
+                        className={`text-left p-3 rounded-xl border transition-all ${cardCls}`}>
                         <div className="flex items-center gap-1.5 mb-1.5">
                           <span className="text-base">{t.modalidades?.emoji ?? '📚'}</span>
                           <div className="flex-1 min-w-0">
-                            <p className="text-[11px] font-bold text-navy-900 dark:text-white truncate">{t.modalidades?.nome ?? '—'}</p>
-                            <p className="text-[9px] text-slate-400">{t.faixa}{t.faixa_etaria ? ` · ${t.faixa_etaria}` : ''}</p>
+                            <p className={`text-[11px] font-bold truncate ${titleCls}`}>{t.modalidades?.nome ?? '—'}</p>
+                            <p className={`text-[9px] ${subCls}`}>{t.faixa}{t.faixa_etaria ? ` · ${t.faixa_etaria}` : ''}</p>
                           </div>
-                          {isAgora && <span className="text-[8px] bg-primary-600 text-white px-1.5 py-0.5 rounded-full font-bold shrink-0">AGORA</span>}
+                          {badgeEl}
                         </div>
-                        <div className="text-[9px] text-slate-500 dark:text-slate-400 space-y-0.5">
+                        <div className={`text-[9px] space-y-0.5 ${subCls}`}>
                           <div className="flex items-center gap-1"><Clock size={8}/>{t.horario?.slice(0,5)}</div>
-                          <div className="flex items-center gap-1"><Users size={8}/>{alunosTurma} alunos</div>
+                          <div className="flex items-center gap-1"><Users size={8}/>{alunosTurmaCount} alunos</div>
                         </div>
                         <div className="mt-2 text-[9px]">
                           {jaRegistrou
-                            ? <span className="flex items-center gap-1 text-primary-600 font-semibold"><CheckCircle2 size={9}/> Presença ok</span>
-                            : <span className="text-slate-400">Toque p/ registrar</span>
+                            ? <span className={`flex items-center gap-1 font-semibold ${checkColor}`}><CheckCircle2 size={9}/> Presença ok</span>
+                            : isPendente
+                            ? <span className="font-bold text-red-600 dark:text-red-400">⚠️ Registre a presença!</span>
+                            : <span className={subCls}>Toque p/ registrar</span>
                           }
-                          {registroHoje && <span className="flex items-center gap-1 text-primary-600 font-semibold"><CheckCircle2 size={9}/> Aula ok</span>}
+                          {registroHoje && <span className={`flex items-center gap-1 font-semibold ${checkColor}`}><CheckCircle2 size={9}/> Aula ok</span>}
                         </div>
                       </button>
                     )
@@ -1884,6 +2194,7 @@ export default function PoloDetalhe() {
         open={!!aulaOpen}
         onClose={() => setAulaOpen(null)}
         onSaved={() => { reloadPresencas(); reloadRegistros() }}
+        adminMode={isAdmin}
       />
 
       {/* Modal Nova / Editar Turma */}
@@ -2445,6 +2756,56 @@ export default function PoloDetalhe() {
         onCancel={() => setDeleteAlunoTarget(null)}
         danger
       />
+
+      {/* Modal: Visualizar como */}
+      <Modal open={viewAsOpen} onClose={() => setViewAsOpen(false)} title="👁 Visualizar como">
+        <div className="space-y-3">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Selecione um funcionário para ver o sistema exatamente como ele vê — turmas, alunos e chamadas filtradas pela atribuição dele.
+          </p>
+          {viewAs && (
+            <div className="flex items-center gap-2 bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-700 rounded-lg px-3 py-2">
+              <Eye size={13} className="text-violet-600 dark:text-violet-400" />
+              <span className="text-xs font-medium text-violet-700 dark:text-violet-300">
+                Ativo: <strong>{viewAs.nome}</strong>
+              </span>
+              <button onClick={() => { setViewAs(null); setViewAsOpen(false) }} className="ml-auto text-xs text-violet-500 hover:text-violet-700 font-medium">
+                Remover
+              </button>
+            </div>
+          )}
+          <div className="space-y-1 max-h-72 overflow-y-auto">
+            {equipe.length === 0 && (
+              <p className="text-xs text-slate-400 text-center py-4">Nenhum funcionário encontrado neste polo.</p>
+            )}
+            {equipe.map(m => {
+              const isSelected = viewAs?.id === m.id
+              const turmasDoMembro = atribuicoes.filter(a => a.usuario_id === m.id && a.turma_id)
+              const qtdTurmas = new Set(turmasDoMembro.map(a => a.turma_id)).size
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => { setViewAs({ id: m.id, nome: m.nome, cargo: m.cargo }); setViewAsOpen(false) }}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${
+                    isSelected
+                      ? 'bg-violet-100 dark:bg-violet-900/30 border border-violet-300 dark:border-violet-600'
+                      : 'hover:bg-slate-50 dark:hover:bg-navy-700 border border-transparent'
+                  }`}
+                >
+                  <div className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/20 flex items-center justify-center flex-shrink-0">
+                    <span className="text-xs font-bold text-primary-700 dark:text-primary-400">{m.nome?.charAt(0)?.toUpperCase()}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-navy-900 dark:text-white truncate">{m.nome}</p>
+                    <p className="text-[11px] text-slate-400 capitalize">{m.cargo} · {qtdTurmas} turma{qtdTurmas !== 1 ? 's' : ''} neste polo</p>
+                  </div>
+                  {isSelected && <CheckCircle2 size={15} className="text-violet-600 flex-shrink-0" />}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

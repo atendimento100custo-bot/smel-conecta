@@ -2,6 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Leaflet — fix de z-index para evitar sobreposição com nav */
+.leaflet-container { z-index: 0; }
+.leaflet-pane { z-index: 400; }
+.leaflet-tile-pane { z-index: 200; }
+.leaflet-overlay-pane { z-index: 400; }
+.leaflet-shadow-pane { z-index: 500; }
+.leaflet-marker-pane { z-index: 600; }
+.leaflet-tooltip-pane { z-index: 650; }
+.leaflet-popup-pane { z-index: 700; }
+.leaflet-control { z-index: 800; }
+
 /* ── Base ─────────────────────────────────────────────────── */
 * { box-sizing: border-box; }
 

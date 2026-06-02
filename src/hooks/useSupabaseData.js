@@ -9,7 +9,7 @@ export function useSupabaseData(table, query = '') {
 
   const load = useCallback(async () => {
     setLoading(true)
-    let req = supabase.from(table).select(query || '*')
+    let req = supabase.from(table).select(query || '*').range(0, 9999)
     const { data: rows, error: err } = await req
     setData(rows ?? [])
     setError(err)

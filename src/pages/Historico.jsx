@@ -39,8 +39,9 @@ create policy "authenticated delete"
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 const ACAO_META = {
-  cadastro_aluno:    { label: 'Cadastro de Aluno',      icon: <UserPlus  size={13} />, bg: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' },
-  registro_presenca: { label: 'Registro de Presença',   icon: <ClipboardList size={13} />, bg: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' },
+  cadastro_aluno:    { label: 'Cadastro de Aluno',   icon: <UserPlus      size={13} />, bg: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' },
+  registro_presenca: { label: 'Presença Registrada', icon: <ClipboardList size={13} />, bg: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' },
+  iniciar_chamada:   { label: 'Chamada Iniciada',    icon: <ClipboardList size={13} />, bg: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' },
 }
 
 const LIMPAR_OPCOES = [
@@ -269,7 +270,8 @@ export default function Historico() {
                 <select value={filtroAcao} onChange={e => setFiltroAcao(e.target.value)} className={inputCls}>
                   <option value="">Todas as ações</option>
                   <option value="cadastro_aluno">Cadastro de Aluno</option>
-                  <option value="registro_presenca">Registro de Presença</option>
+                  <option value="iniciar_chamada">Chamada Iniciada</option>
+                  <option value="registro_presenca">Presença Registrada</option>
                 </select>
 
                 <input type="date" value={filtroDataDe} onChange={e => setFiltroDataDe(e.target.value)}

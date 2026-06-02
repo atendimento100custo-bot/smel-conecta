@@ -5,7 +5,7 @@ import { useTheme } from '../contexts/ThemeContext'
 import { useSidebar } from '../contexts/SidebarContext'
 import {
   LayoutDashboard, MapPin, Trophy, Users,
-  UserCheck, BarChart2, Key, Settings, LogOut, Sun, Moon, X, History
+  UserCheck, BarChart2, Key, Settings, LogOut, Sun, Moon, X, History, Activity, ClipboardList
 } from 'lucide-react'
 
 const NAV = [
@@ -19,6 +19,7 @@ const NAV = [
     label: 'Gestão',
     items: [
       { to: '/polos', icon: MapPin, label: 'Polos', minRole: 'estagiario' },
+      { to: '/presenca', icon: ClipboardList, label: 'Presença', minRole: 'estagiario' },
       { to: '/modalidades', icon: Trophy, label: 'Modalidades', minRole: 'coordenador' },
       { to: '/alunos', icon: Users, label: 'Alunos', minRole: 'professor' },
       { to: '/equipes', icon: UserCheck, label: 'Equipe', minRole: 'coordenador' },
@@ -30,6 +31,7 @@ const NAV = [
       { to: '/relatorios', icon: BarChart2, label: 'Relatórios', minRole: 'professor' },
       { to: '/gerenciar-acesso', icon: Key, label: 'Acessos', minRole: 'admin' },
       { to: '/historico', icon: History, label: 'Histórico', minRole: 'admin' },
+      { to: '/infra', icon: Activity, label: 'Infraestrutura', minRole: 'admin' },
       { to: '/configuracoes', icon: Settings, label: 'Configurações', minRole: 'estagiario' },
     ]
   },

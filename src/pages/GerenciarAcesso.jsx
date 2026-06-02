@@ -8,7 +8,7 @@ import Badge from '../components/ui/Badge'
 import Modal from '../components/ui/Modal'
 import EmptyState from '../components/ui/EmptyState'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
-import { Search, Pencil, Link2, X, Trash2 } from 'lucide-react'
+import { Search, Pencil, Link2, X, Trash2, KeyRound, Copy, Check } from 'lucide-react'
 
 const CARGO_COLORS = { admin: 'purple', coordenador: 'blue', professor: 'green', estagiario: 'amber' }
 const CARGO_LABELS = { admin: 'Administrador', coordenador: 'Coordenador', professor: 'Professor', estagiario: 'Estagiário' }
@@ -33,6 +33,70 @@ export default function GerenciarAcesso() {
   // Excluir usuário
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleting, setDeleting] = useState(false)
+
+  // Modal credenciais (email + senha)
+  const DEFAULT_SENHA = 'smel2026'
+  const [resetTarget, setResetTarget] = useState(null)
+  const [novoEmail, setNovoEmail] = useState('')
+  const [savingEmail, setSavingEmail] = useState(false)
+  const [emailDone, setEmailDone] = useState(false)
+  const [emailError, setEmailError] = useState('')
+  const [resetting, setResetting] = useState(false)
+  const [resetDone, setResetDone] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  function openCredenciais(p) {
+    setResetTarget(p)
+    setNovoEmail(p.email ?? '')
+    setSavingEmail(false)
+    setEmailDone(false)
+    setEmailError('')
+    setResetting(false)
+    setResetDone(false)
+    setCopied(false)
+  }
+
+  async function handleSalvarEmail() {
+    if (!resetTarget || !supabaseAdmin) return
+    const email = novoEmail.trim()
+    if (!email || email === resetTarget.email) return
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setEmailError('Email inválido'); return }
+    setSavingEmail(true)
+    setEmailError('')
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(resetTarget.id, { email })
+    if (error) {
+      setEmailError(error.message || 'Erro ao atualizar email')
+    } else {
+      // Atualiza também o profile
+      await supabase.from('profiles').update({ email }).eq('id', resetTarget.id)
+      setEmailDone(true)
+      setResetTarget(prev => ({ ...prev, email }))
+      reload()
+    }
+    setSavingEmail(false)
+  }
+
+  async function handleResetSenha() {
+    if (!resetTarget || !supabaseAdmin) return
+    setResetting(true)
+    await supabaseAdmin.auth.admin.updateUserById(resetTarget.id, { password: DEFAULT_SENHA })
+    setResetting(false)
+    setResetDone(true)
+  }
+
+  function handleCopySenha() {
+    navigator.clipboard.writeText(DEFAULT_SENHA)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  function closeReset() {
+    setResetTarget(null)
+    setEmailDone(false)
+    setEmailError('')
+    setResetDone(false)
+    setCopied(false)
+  }
 
   async function handleDelete() {
     if (!deleteTarget || !supabaseAdmin) return
@@ -186,6 +250,9 @@ export default function GerenciarAcesso() {
                                   <Link2 size={13} />
                                 </button>
                               )}
+                              <button onClick={() => openCredenciais(p)} className="p-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/20 text-slate-400 hover:text-amber-500 transition-colors" title="Redefinir senha">
+                                <KeyRound size={13} />
+                              </button>
                               <button onClick={() => setDeleteTarget(p)} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-500 transition-colors" title="Excluir usuário">
                                 <Trash2 size={13} />
                               </button>
@@ -214,6 +281,7 @@ export default function GerenciarAcesso() {
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-1 justify-end">
                               <button onClick={() => openEdit(p)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-navy-600 text-slate-400 hover:text-slate-600 transition-colors"><Pencil size={13}/></button>
+                              <button onClick={() => openCredenciais(p)} className="p-1.5 rounded-lg hover:bg-amber-50 text-slate-400 hover:text-amber-500 transition-colors" title="Redefinir senha"><KeyRound size={13}/></button>
                               <button onClick={() => setDeleteTarget(p)} className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"><Trash2 size={13}/></button>
                             </div>
                           </td>
@@ -340,6 +408,89 @@ export default function GerenciarAcesso() {
           </div>
         )}
       </Modal>
+      {/* Modal: Credenciais (email + senha) */}
+      <Modal open={!!resetTarget} onClose={closeReset} title="Credenciais de Acesso">
+        <div className="space-y-5">
+          {/* Cabeçalho usuário */}
+          {resetTarget && (
+            <div className="flex items-center gap-2.5 bg-slate-50 dark:bg-navy-700 rounded-lg px-3 py-2.5 border border-slate-100 dark:border-navy-600">
+              <div className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center flex-shrink-0">
+                <span className="text-xs font-bold text-primary-700 dark:text-primary-400">{(resetTarget.nome || resetTarget.email || '?')[0].toUpperCase()}</span>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-navy-900 dark:text-white">{resetTarget.nome || 'Sem nome'}</p>
+                {resetTarget.email && <p className="text-[10px] text-slate-400">{resetTarget.email}</p>}
+              </div>
+            </div>
+          )}
+
+          {/* Seção: Email */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+              📧 Email de acesso
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="email"
+                value={novoEmail}
+                onChange={e => { setNovoEmail(e.target.value); setEmailDone(false); setEmailError('') }}
+                className={ic + ' flex-1'}
+                placeholder="novo@email.com"
+              />
+              <Button
+                size="sm"
+                variant={emailDone ? 'secondary' : 'primary'}
+                onClick={handleSalvarEmail}
+                disabled={savingEmail || !novoEmail.trim() || novoEmail.trim() === resetTarget?.email}
+              >
+                {savingEmail ? '...' : emailDone ? <><Check size={13} className="inline mr-1 text-emerald-500" />Salvo</> : 'Salvar'}
+              </Button>
+            </div>
+            {emailError && <p className="text-[11px] text-red-500">{emailError}</p>}
+            {emailDone && <p className="text-[11px] text-emerald-600 dark:text-emerald-400">✓ Email atualizado com sucesso!</p>}
+          </div>
+
+          {/* Divisor */}
+          <div className="border-t border-slate-200 dark:border-navy-700" />
+
+          {/* Seção: Senha */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+              🔑 Redefinir senha
+            </p>
+            {!resetDone ? (
+              <>
+                <div className="flex items-center justify-between bg-slate-100 dark:bg-navy-900 rounded-lg px-3 py-2 border border-slate-200 dark:border-navy-700">
+                  <code className="text-sm font-mono font-bold text-navy-900 dark:text-white tracking-wider">{DEFAULT_SENHA}</code>
+                  <span className="text-[10px] text-slate-400">senha padrão</span>
+                </div>
+                <Button size="sm" onClick={handleResetSenha} disabled={resetting} className="w-full">
+                  {resetting ? 'Redefinindo...' : 'Redefinir para senha padrão'}
+                </Button>
+              </>
+            ) : (
+              <>
+                <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-lg px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400 font-medium">
+                  ✓ Senha redefinida! Envie as credenciais abaixo para o usuário.
+                </div>
+                <div className="bg-slate-50 dark:bg-navy-900 rounded-lg p-3 border border-slate-200 dark:border-navy-700 text-xs space-y-1">
+                  <p className="text-slate-500">📧 <span className="font-medium text-navy-900 dark:text-white">{resetTarget?.email}</span></p>
+                  <p className="text-slate-500">🔑 <span className="font-medium text-navy-900 dark:text-white">{DEFAULT_SENHA}</span></p>
+                </div>
+                <Button variant="secondary" size="sm" onClick={handleCopySenha} className="w-full flex items-center justify-center gap-1.5">
+                  {copied ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
+                  {copied ? 'Copiado!' : 'Copiar senha'}
+                </Button>
+              </>
+            )}
+          </div>
+
+          <div className="flex justify-end pt-1">
+            <Button variant="secondary" size="sm" onClick={closeReset}>Fechar</Button>
+          </div>
+        </div>
+      </Modal>
+
       <ConfirmDialog
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}

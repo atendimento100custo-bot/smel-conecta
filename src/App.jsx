@@ -20,6 +20,7 @@ import Relatorios from './pages/Relatorios'
 import GerenciarAcesso from './pages/GerenciarAcesso'
 import Configuracoes from './pages/Configuracoes'
 import Historico from './pages/Historico'
+import Infra from './pages/Infra'
 
 function R({ minRole, children }) {
   return <ProtectedRoute minRole={minRole}>{children}</ProtectedRoute>
@@ -46,6 +47,7 @@ export default function App() {
         <Route path="relatorios" element={<R minRole="professor"><Relatorios /></R>} />
         <Route path="gerenciar-acesso" element={<R minRole="admin"><GerenciarAcesso /></R>} />
         <Route path="historico" element={<R minRole="admin"><Historico /></R>} />
+        <Route path="infra" element={<R minRole="admin"><Infra /></R>} />
         <Route path="configuracoes" element={<Configuracoes />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

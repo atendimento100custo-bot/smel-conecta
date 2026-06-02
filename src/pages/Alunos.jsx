@@ -11,6 +11,7 @@ import Badge from '../components/ui/Badge'
 import Modal from '../components/ui/Modal'
 import EmptyState from '../components/ui/EmptyState'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
+import { useToast } from '../components/ui/Toast'
 import { Plus, Pencil, Trash2, Upload, FileText, CheckCircle2, ArrowLeft, ChevronRight, Search, Filter, Circle, Camera, X } from 'lucide-react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 
@@ -64,6 +65,7 @@ export default function Alunos() {
   const { isAdmin, isCoordenador, isProfessor, isEstagiario, profile } = useAuth()
   const { dark } = useTheme()
   const { offline, pending, addToQueue } = useOfflineQueue()
+  const { showToast, toastEl } = useToast()
   const canEdit = isAdmin || isCoordenador || isProfessor || isEstagiario
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -302,9 +304,11 @@ export default function Alunos() {
     try {
       let alunoId = editing?.id
       if (editing) {
-        await supabase.from('alunos').update(payload).eq('id', editing.id)
+        const { error: updateErr } = await supabase.from('alunos').update(payload).eq('id', editing.id)
+        if (updateErr) throw updateErr
       } else {
-        const { data } = await supabase.from('alunos').insert(payload).select('id').single()
+        const { data, error: insertErr } = await supabase.from('alunos').insert(payload).select('id').single()
+        if (insertErr) throw insertErr
         alunoId = data?.id
         // Save atestado for new Melhor Idade student
         if (alunoId && temTurmaMelhorIdade && form.atestado_validade) {
@@ -319,19 +323,35 @@ export default function Alunos() {
       if (alunoId) {
         await supabase.from('aluno_turmas').delete().eq('aluno_id', alunoId)
         const rows = matriculas.filter(m => m.turma_id).map(m => ({ aluno_id: alunoId, turma_id: m.turma_id }))
-        if (rows.length) await supabase.from('aluno_turmas').insert(rows)
+        if (rows.length) {
+          const { error: turmaErr } = await supabase.from('aluno_turmas').insert(rows)
+          if (turmaErr) {
+            console.warn('[aluno_turmas insert]', turmaErr.message)
+            if (turmaErr.code === '42501') {
+              throw { code: '42501', context: 'aluno_turmas' }
+            }
+          }
+        }
       }
       setSaving(false)
       setModalOpen(false)
       reload()
+      showToast(`✅ Aluno "${form.nome.trim()}" ${editing ? 'atualizado' : 'cadastrado'} com sucesso!`, 'success')
     } catch (erro) {
+      setSaving(false)
       if (offline || !navigator.onLine) {
         addToQueue({ type: 'aluno', data: payload, isEditing: !!editing, matriculas: matriculas.filter(m => m.turma_id) })
-        setSaving(false)
         setModalOpen(false)
       } else {
         console.error('Erro ao salvar aluno:', erro)
-        setSaving(false)
+        const msg = erro?.code === '42501'
+          ? erro?.context === 'aluno_turmas'
+            ? 'Você não tem permissão para matricular alunos nessa turma. Peça ao coordenador para verificar se você está vinculado a ela.'
+            : 'Você não tem permissão para cadastrar alunos aqui. Peça ao coordenador para verificar seu acesso ao polo.'
+          : erro?.message?.includes('unique') || erro?.code === '23505'
+          ? 'Esse CPF já está cadastrado. Pesquise o nome do aluno antes de cadastrar novamente.'
+          : `Erro inesperado ao salvar. Tente novamente ou avise o suporte: ${erro?.message ?? ''}`
+        showToast(msg, 'error')
       }
     }
   }
@@ -421,6 +441,7 @@ export default function Alunos() {
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
+      {toastEl}
       <Topbar
         title={turmaLabel2 ? `Alunos — ${turmaLabel2}` : `Alunos · ${alunosVisiveis.length}`}
         action={topbarAction}
