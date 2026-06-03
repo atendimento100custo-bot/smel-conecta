@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
+import Topbar from '../components/Topbar'
 import {
   Database, Users, Server, ExternalLink, RefreshCw,
   AlertTriangle, CheckCircle, XCircle, Activity, Table2,
@@ -150,6 +151,9 @@ export default function Infra() {
   )
 
   return (
+    <div className="flex flex-col flex-1 overflow-hidden">
+    <Topbar title="Infraestrutura"/>
+    <div className="flex-1 overflow-y-auto">
     <div className="max-w-4xl mx-auto px-4 py-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
@@ -353,6 +357,8 @@ export default function Infra() {
           )}
         </>
       )}
+    </div>
+    </div>
     </div>
   )
 }

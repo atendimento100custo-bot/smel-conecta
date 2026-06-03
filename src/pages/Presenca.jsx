@@ -4,11 +4,12 @@ import { useSupabaseData } from '../hooks/useSupabaseData'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { logAcao } from '../lib/auditLog'
+import { useSidebar } from '../contexts/SidebarContext'
 import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import {
   Check, X, Save, Users, Clock, StopCircle, ChevronDown, ChevronUp,
-  AlertCircle, ShieldCheck, PlayCircle, List, Map as MapIcon
+  AlertCircle, ShieldCheck, PlayCircle, List, Map as MapIcon, Menu
 } from 'lucide-react'
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
 import L from 'leaflet'
@@ -52,6 +53,7 @@ function fmtDate(iso) {
 // ─── main component ───────────────────────────────────────────────────────────
 export default function Presenca() {
   const { profile, isAdmin, isCoordenador, isProfessor } = useAuth()
+  const { toggle: toggleSidebar } = useSidebar()
 
   // ── turmas ──────────────────────────────────────────────────────────────────
   const { data: allTurmas, loading: turmasLoading } = useSupabaseData(
@@ -553,6 +555,10 @@ export default function Presenca() {
 
             {/* Cabeçalho do painel com data e toggle lista/mapa integrados */}
             <div className="px-4 py-3 flex items-center gap-3 flex-wrap border-b border-slate-100 dark:border-navy-700">
+              <button onClick={toggleSidebar}
+                className="md:hidden p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-navy-700 transition-colors flex-shrink-0">
+                <Menu size={17}/>
+              </button>
               <button onClick={() => setPainelOpen(v => !v)} className="flex items-center gap-2 flex-1 min-w-0 hover:opacity-80 transition-opacity">
                 <ShieldCheck size={15} className="text-primary-500 flex-shrink-0"/>
                 <span className="text-sm font-bold text-navy-900 dark:text-white truncate">
