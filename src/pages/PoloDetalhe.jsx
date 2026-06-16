@@ -133,6 +133,11 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
       })
   }, [alunos, turma, buscaPresenca])
 
+  const nomesDuplosTurma = useMemo(() => {
+    const nomes = alunosTurma.map(a => (a.nome ?? '').trim().toLowerCase())
+    return new Set(nomes.filter((n, _, arr) => arr.filter(x => x === n).length > 1))
+  }, [alunosTurma])
+
   // Carrega chamada existente ao abrir o modal
   useEffect(() => {
     if (!turma || !open) { setChamada(null); return }
@@ -476,7 +481,12 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
                           <div className="w-6 h-6 rounded-full bg-slate-300 dark:bg-navy-600 flex items-center justify-center flex-shrink-0">
                             <span className="text-white text-[9px] font-bold">{a.nome?.charAt(0)}</span>
                           </div>
-                          <span className="text-xs font-medium text-slate-400 dark:text-slate-500 text-left flex-1 truncate">{a.nome}</span>
+                          <span className="text-xs font-medium text-slate-400 dark:text-slate-500 text-left flex-1 truncate">
+                            {a.nome}
+                            {nomesDuplosTurma.has((a.nome ?? '').trim().toLowerCase()) && (
+                              <span className="ml-1 text-[9px] font-semibold text-amber-700 bg-amber-100 border border-amber-300 px-1 py-0.5 rounded">⚠️ repetido</span>
+                            )}
+                          </span>
                           <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border flex-shrink-0 ${
                             a.status === 'Transferido'
                               ? 'text-amber-700 bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-700 dark:text-amber-400'
@@ -511,7 +521,12 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
                         <div className="w-6 h-6 rounded-full bg-primary-600 flex items-center justify-center flex-shrink-0">
                           <span className="text-white text-[9px] font-bold">{a.nome?.charAt(0)}</span>
                         </div>
-                        <span className="text-xs font-medium text-navy-900 dark:text-white text-left flex-1">{a.nome}</span>
+                        <span className="text-xs font-medium text-navy-900 dark:text-white text-left flex-1">
+                          {a.nome}
+                          {nomesDuplosTurma.has((a.nome ?? '').trim().toLowerCase()) && (
+                            <span className="ml-1 text-[9px] font-semibold text-amber-700 bg-amber-100 border border-amber-300 px-1 py-0.5 rounded">⚠️ repetido</span>
+                          )}
+                        </span>
                         <span className={`text-[10px] font-semibold ${isJustificado ? 'text-amber-500' : isPresente ? 'text-primary-600' : 'text-red-400'}`}>
                           {isJustificado ? 'Justificada' : isPresente ? 'Presente' : 'Falta'}
                         </span>
@@ -1197,9 +1212,9 @@ export default function PoloDetalhe() {
     const erros = validateAlunoForm(novoAlunoForm)
     setNovoAlunoErrors(erros)
     if (Object.keys(erros).length > 0) return
-    if (!forcarSalvar) {
-      const normNome = normNomeAluno(novoAlunoForm.nome)
-      const dup = alunosPolo.find(a => normNomeAluno(a.nome) === normNome)
+    if (!forcarSalvar && novoAlunoForm.cpf) {
+      const cpfNorm = novoAlunoForm.cpf.replace(/\D/g, '')
+      const dup = cpfNorm.length >= 11 && alunosPolo.find(a => a.cpf && a.cpf.replace(/\D/g, '') === cpfNorm)
       if (dup) {
         const turmaDup = turmasPolo.find(t => t.id === dup.turma_id)
         setDupWarning({ aluno: dup, turma: turmaDup })
@@ -2645,7 +2660,7 @@ export default function PoloDetalhe() {
       <ConfirmDialog
         open={!!dupWarning}
         title="Aluno possivelmente duplicado"
-        description={`Já existe "${dupWarning?.aluno?.nome}" neste polo${dupWarning?.turma ? ` (${dupWarning.turma.modalidades?.nome ?? 'turma'})` : ''}. Deseja cadastrar mesmo assim?`}
+        description={`Já existe um aluno com esse CPF neste polo: "${dupWarning?.aluno?.nome}"${dupWarning?.turma ? ` (${dupWarning.turma.modalidades?.nome ?? 'turma'})` : ''}. Deseja cadastrar mesmo assim?`}
         onConfirm={() => { setDupWarning(null); salvarNovoAluno(true) }}
         onClose={() => setDupWarning(null)}
       />

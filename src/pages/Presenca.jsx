@@ -137,6 +137,10 @@ export default function Presenca() {
     if (!historyMap[p.aluno_id]) historyMap[p.aluno_id] = {}
     historyMap[p.aluno_id][p.data] = p.status
   }
+  const nomesDuplos = new Set(
+    alunos.map(a => (a.nome ?? '').trim().toLowerCase())
+          .filter((n, _, arr) => arr.filter(x => x === n).length > 1)
+  )
   const alunosAtivos      = alunos.filter(a => a.status === 'Ativo')
   const totalPresentes    = alunosAtivos.filter(a => presencaState[a.id] === 'presente').length
   const totalFaltas       = alunosAtivos.filter(a => presencaState[a.id] === 'falta').length
@@ -434,7 +438,12 @@ export default function Presenca() {
                   return (
                     <li key={a.id} className="flex items-center justify-between px-4 py-3">
                       <div className="flex-1 min-w-0">
-                        <span className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate block">{a.nome}</span>
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate block">
+                          {a.nome}
+                          {nomesDuplos.has((a.nome ?? '').trim().toLowerCase()) && (
+                            <span className="ml-1.5 text-[10px] font-semibold text-amber-700 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded" title="Há outro aluno com o mesmo nome nesta turma">⚠️ Nome repetido</span>
+                          )}
+                        </span>
                         {mot && <span className="text-[10px] text-amber-600">{mot}</span>}
                       </div>
                       <div className="flex-shrink-0 ml-3">
@@ -453,8 +462,11 @@ export default function Presenca() {
                   const ativo = aluno.status === 'Ativo'
                   return (
                     <li key={aluno.id} className={`flex items-center justify-between px-4 py-3 ${ativo ? 'hover:bg-slate-50/60 dark:hover:bg-navy-700/30' : 'opacity-60 bg-slate-50/40 dark:bg-navy-900/20'}`}>
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
                         <span className={`text-sm font-medium truncate ${ativo ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400'}`}>{aluno.nome}</span>
+                        {nomesDuplos.has((aluno.nome ?? '').trim().toLowerCase()) && (
+                          <span className="text-[10px] font-semibold text-amber-700 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded flex-shrink-0" title="Há outro aluno com o mesmo nome nesta turma">⚠️ Nome repetido</span>
+                        )}
                         {!ativo && <span className="text-[10px] text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">{aluno.status}</span>}
                       </div>
                       {ativo ? (
@@ -521,7 +533,12 @@ export default function Presenca() {
                     <tbody className="divide-y divide-slate-100 dark:divide-navy-700">
                       {alunos.map(a => (
                         <tr key={a.id} className="hover:bg-slate-50/60 dark:hover:bg-navy-700/30">
-                          <td className="px-4 py-2 font-medium text-slate-700 dark:text-slate-300 truncate max-w-[12rem]">{a.nome}</td>
+                          <td className="px-4 py-2 font-medium text-slate-700 dark:text-slate-300 max-w-[12rem]">
+                            <span className="truncate block">{a.nome}</span>
+                            {nomesDuplos.has((a.nome ?? '').trim().toLowerCase()) && (
+                              <span className="text-[9px] font-semibold text-amber-700 bg-amber-100 border border-amber-300 px-1 py-0.5 rounded" title="Há outro aluno com o mesmo nome nesta turma">⚠️ repetido</span>
+                            )}
+                          </td>
                           {dateRange.map(d => {
                             const val = historyMap[a.id]?.[d]
                             return (

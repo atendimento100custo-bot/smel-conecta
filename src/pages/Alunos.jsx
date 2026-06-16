@@ -276,10 +276,10 @@ export default function Alunos() {
       setAlunoErrors(errs)
       return
     }
-    // Duplicate detection (only for new students)
-    if (!editing && !forcarSalvar) {
-      const nomeNorm = normNomeAluno(form.nome)
-      const dup = alunos.find(a => normNomeAluno(a.nome) === nomeNorm)
+    // Duplicate detection by CPF only (names can repeat)
+    if (!editing && !forcarSalvar && form.cpf) {
+      const cpfNorm = form.cpf.replace(/\D/g, '')
+      const dup = cpfNorm.length >= 11 && alunos.find(a => a.cpf && a.cpf.replace(/\D/g, '') === cpfNorm)
       if (dup) {
         setDupWarningAlunos({ aluno: dup })
         return
@@ -963,7 +963,7 @@ export default function Alunos() {
       <ConfirmDialog
         open={!!dupWarningAlunos}
         title="Aluno possivelmente duplicado"
-        description={`Já existe um aluno chamado "${dupWarningAlunos?.aluno?.nome}" no sistema. Deseja cadastrar mesmo assim?`}
+        description={`Já existe um aluno com esse CPF no sistema: "${dupWarningAlunos?.aluno?.nome}". Deseja cadastrar mesmo assim?`}
         onConfirm={() => { setDupWarningAlunos(null); handleSave(true) }}
         onClose={() => setDupWarningAlunos(null)}
       />
