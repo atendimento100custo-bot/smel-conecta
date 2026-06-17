@@ -1,7 +1,8 @@
 // src/pages/Dashboard.jsx
-import { useMemo, useRef, useLayoutEffect } from 'react'
+import { useMemo, useRef, useLayoutEffect, useState, useEffect, useCallback } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { useSupabaseData } from '../hooks/useSupabaseData'
+import { supabase } from '../lib/supabase'
 import { useTheme } from '../contexts/ThemeContext'
 import Topbar from '../components/Topbar'
 import { subDays, format, startOfMonth, endOfMonth } from 'date-fns'
@@ -84,7 +85,13 @@ export default function Dashboard() {
   const { dark } = useTheme()
   const { data: alunos } = useSupabaseData('alunos', 'id,nome,status,turma_id,data_nasc,data_matricula')
   const { data: turmas } = useSupabaseData('turmas', 'id,status,modalidade_id,capacidade,faixa,horario,polo_id,modalidades(nome,emoji),polos(nome,tipo,bairro)')
-  const { data: presencas } = useSupabaseData('presencas', 'id,data,status,turma_id,aluno_id')
+  const [presencas, setPresencas] = useState([])
+  const loadPresencas = useCallback(async () => {
+    const since = format(subDays(new Date(), 90), 'yyyy-MM-dd')
+    const { data } = await supabase.from('presencas').select('id,data,status,turma_id,aluno_id').gte('data', since).order('data', { ascending: false }).limit(50000)
+    setPresencas(data ?? [])
+  }, [])
+  useEffect(() => { loadPresencas() }, [loadPresencas])
   const { data: atestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id')
   const { data: polos } = useSupabaseData('polos', 'id,nome,tipo,bairro,status')
   const { data: modalidades } = useSupabaseData('modalidades', 'id,nome,emoji,status')
@@ -272,6 +279,7 @@ export default function Dashboard() {
           <KpiCard label="Ocupação" value={`${ocupacao}%`} sub="capacidade total" />
           <KpiCard label="Atestados Vencidos" value={atestadosVencidos} sub="requer atenção" />
         </div>
+        <p className="text-[9px] text-slate-400 dark:text-slate-600 text-right">Freq. Média considera o mês atual · dados dos últimos 90 dias</p>
 
         {/* Alertas */}
         {atestadosVencendo > 0 && (

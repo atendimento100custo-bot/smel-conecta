@@ -1396,7 +1396,7 @@ export default function PoloDetalhe() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <KpiCard label="Alunos Ativos" value={alunosAtivos} sub={`em ${turmasAtivas} turmas`} icon={Users} highlight />
               <KpiCard label="Turmas Ativas" value={turmasAtivas} sub="em funcionamento" icon={BookOpen} />
-              <KpiCard label="Freq. Média" value={`${freqMedia}%`} sub="geral no polo" icon={TrendingUp} />
+              <KpiCard label="Freq. Média" value={`${freqMedia}%`} sub="últimos 90 dias" icon={TrendingUp} />
               <KpiCard label="Melhor Idade" value={melhorIdade} sub="alunos 60+" icon={UserCheck} />
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -1405,6 +1405,7 @@ export default function PoloDetalhe() {
               <KpiCard label="Atestados Vencendo" value={atestadosVencendo} sub="próximos 30 dias" icon={Stethoscope} />
               <KpiCard label="Atestados Vencidos" value={atestadosVencidos} sub="requer renovação" icon={Stethoscope} />
             </div>
+            <p className="text-[9px] text-slate-400 dark:text-slate-600 text-right">Freq. Média baseada nos últimos 90 dias de presença</p>
 
             {atestadosVencendo > 0 && (
               <button onClick={() => { setAtestadosFiltro('vencendo'); setAtestadosModalOpen(true) }} className="w-full text-left bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl px-4 py-3 text-xs text-amber-800 dark:text-amber-300 font-medium hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors">
