@@ -599,7 +599,19 @@ export default function PoloDetalhe() {
   const { data: polos } = useSupabaseData('polos', '*')
   const { data: turmas, reload: reloadTurmas, loading: loadingTurmas } = useSupabaseData('turmas', '*, modalidades(nome,emoji), profiles(id,nome,cargo), polos(nome)')
   const { data: alunos, reload: reloadAlunos } = useSupabaseData('alunos', 'id,nome,status,turma_id,data_nasc,data_matricula,cpf,telefone,telefone_emergencia,email,genero,foto_url,aluno_turmas(turma_id)')
-  const { data: presencas, reload: reloadPresencas } = useSupabaseData('presencas', 'id,data,status,turma_id,aluno_id')
+  // Busca apenas os últimos 90 dias para evitar o limite de 10k linhas do hook genérico
+  const [presencas, setPresencas] = useState([])
+  const reloadPresencas = useCallback(async () => {
+    const since = format(subDays(new Date(), 90), 'yyyy-MM-dd')
+    const { data } = await supabase
+      .from('presencas')
+      .select('id,data,status,turma_id,aluno_id')
+      .gte('data', since)
+      .order('data', { ascending: false })
+      .limit(50000)
+    setPresencas(data ?? [])
+  }, [])
+  useEffect(() => { reloadPresencas() }, [reloadPresencas])
   const { data: atestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id')
   const { data: viagens, reload: reloadViagens } = useSupabaseData('viagens', '*, turmas(*, modalidades(nome,emoji))')
   const { data: modalidades } = useSupabaseData('modalidades', 'id,nome,emoji')
