@@ -617,7 +617,18 @@ export default function PoloDetalhe() {
   const { data: modalidades } = useSupabaseData('modalidades', 'id,nome,emoji')
   const { data: professores, reload: reloadProfessores } = useSupabaseData('profiles', 'id,nome,cargo,telefone,email')
   const { data: atribuicoes, loading: loadingAtribuicoes, reload: reloadAtribuicoes } = useSupabaseData('atribuicoes', 'id,usuario_id,polo_id,turma_id,cargo')
-  const { data: registros, reload: reloadRegistros } = useSupabaseData('registros_aula', 'id,turma_id,data,conteudo,ocorrencias,alunos_presentes')
+  const [registros, setRegistros] = useState([])
+  const reloadRegistros = useCallback(async () => {
+    const since = format(subDays(new Date(), 180), 'yyyy-MM-dd')
+    const { data } = await supabase
+      .from('registros_aula')
+      .select('id,turma_id,data,conteudo,ocorrencias,alunos_presentes')
+      .gte('data', since)
+      .order('data', { ascending: false })
+      .limit(20000)
+    setRegistros(data ?? [])
+  }, [])
+  useEffect(() => { reloadRegistros() }, [reloadRegistros])
 
   // Nova / editar turma form
   const [turmaModalOpen, setTurmaModalOpen] = useState(false)
