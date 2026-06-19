@@ -1235,66 +1235,79 @@ export default function PoloDetalhe() {
     const erros = validateAlunoForm(novoAlunoForm)
     setNovoAlunoErrors(erros)
     if (Object.keys(erros).length > 0) return
-    if (!forcarSalvar && novoAlunoForm.cpf) {
-      const cpfNorm = novoAlunoForm.cpf.replace(/\D/g, '')
-      const dup = cpfNorm.length >= 11 && alunosPolo.find(a => a.cpf && a.cpf.replace(/\D/g, '') === cpfNorm)
-      if (dup) {
-        const turmaDup = turmasPolo.find(t => t.id === dup.turma_id)
-        setDupWarning({ aluno: dup, turma: turmaDup })
-        return
-      }
+
+    // Busca CPF em TODOS os alunos do sistema (não só do polo) para suporte cross-polo
+    const cpfNorm = novoAlunoForm.cpf ? novoAlunoForm.cpf.replace(/\D/g, '') : ''
+    const alunoExistente = cpfNorm.length >= 11
+      ? alunos.find(a => a.cpf && a.cpf.replace(/\D/g, '') === cpfNorm)
+      : null
+
+    if (!forcarSalvar && alunoExistente) {
+      const turmaDup = turmasPolo.find(t => t.id === alunoExistente.turma_id)
+      setDupWarning({ aluno: alunoExistente, turma: turmaDup })
+      return
     }
+
     setDupWarning(null)
     setNovoAlunoError('')
     setSavingAluno(true)
     const turmaMelhorIdade = turmasPolo.find(t => t.id === novoAlunoForm.turma_id)?.faixa === 'Melhor Idade'
-    const payload = {
-      nome: novoAlunoForm.nome.trim(),
-      data_nasc: novoAlunoForm.data_nasc || null,
-      cpf: novoAlunoForm.cpf || null,
-      telefone: novoAlunoForm.telefone || null,
-      telefone_emergencia: novoAlunoForm.telefone_emergencia || null,
-      email: novoAlunoForm.email || null,
-      turma_id: novoAlunoForm.turma_id || null,
-      status: novoAlunoForm.status,
-      genero: novoAlunoForm.genero || null,
-      foto_url: novoAlunoForm.foto_url || null,
-    }
+
     try {
-      const { data, error: insertError } = await supabase.from('alunos').insert(payload).select('id').single()
-      if (insertError || !data?.id) {
-        setSavingAluno(false)
-        setNovoAlunoError('Não foi possível salvar o aluno. Verifique se você tem permissão para esta turma ou tente novamente.')
-        return
-      }
-      if (data?.id) {
-        // Log de auditoria
-        const turmaAluno = turmasPolo.find(t => t.id === novoAlunoForm.turma_id)
-        logAcao({
-          acao: 'cadastro_aluno',
-          perfil: profile,
-          polo,
-          turma: turmaAluno,
-          aluno: { id: data.id, nome: novoAlunoForm.nome.trim() },
-        })
-        if (novoAlunoForm.turma_id) {
-          await supabase.from('aluno_turmas').insert({ aluno_id: data.id, turma_id: novoAlunoForm.turma_id })
+      let alunoId
+
+      if (alunoExistente) {
+        // Aluno já existe — apenas matricula na nova turma, sem criar duplicata
+        alunoId = alunoExistente.id
+      } else {
+        const payload = {
+          nome: novoAlunoForm.nome.trim(),
+          data_nasc: novoAlunoForm.data_nasc || null,
+          cpf: novoAlunoForm.cpf || null,
+          telefone: novoAlunoForm.telefone || null,
+          telefone_emergencia: novoAlunoForm.telefone_emergencia || null,
+          email: novoAlunoForm.email || null,
+          turma_id: novoAlunoForm.turma_id || null,
+          status: novoAlunoForm.status,
+          genero: novoAlunoForm.genero || null,
+          foto_url: novoAlunoForm.foto_url || null,
         }
+        const { data, error: insertError } = await supabase.from('alunos').insert(payload).select('id').single()
+        if (insertError || !data?.id) {
+          setSavingAluno(false)
+          setNovoAlunoError('Não foi possível salvar o aluno. Verifique se você tem permissão para esta turma ou tente novamente.')
+          return
+        }
+        alunoId = data.id
         if (turmaMelhorIdade && novoAlunoForm.atestado_validade) {
           await supabase.from('atestados').insert({
-            aluno_id: data.id,
+            aluno_id: alunoId,
             data_validade: novoAlunoForm.atestado_validade,
             arquivo_url: novoAlunoForm.atestado_foto || null,
           })
         }
-        setSavingAluno(false)
-        setNovoAlunoOpen(false)
-        setNovoAlunoForm(EMPTY_ALUNO)
-        reloadAlunos() // atualiza lista imediatamente para evitar duplicatas
-        showToast(`✅ Aluno "${novoAlunoForm.nome.trim()}" cadastrado com sucesso!`, 'success')
       }
+
+      const turmaAluno = turmasPolo.find(t => t.id === novoAlunoForm.turma_id)
+      logAcao({ acao: 'cadastro_aluno', perfil: profile, polo, turma: turmaAluno, aluno: { id: alunoId, nome: alunoExistente?.nome ?? novoAlunoForm.nome.trim() } })
+
+      if (novoAlunoForm.turma_id) {
+        const { error: turmaErr } = await supabase.from('aluno_turmas')
+          .upsert({ aluno_id: alunoId, turma_id: novoAlunoForm.turma_id }, { onConflict: 'aluno_id,turma_id', ignoreDuplicates: true })
+        if (turmaErr && turmaErr.code !== '23505') throw turmaErr
+      }
+
+      setSavingAluno(false)
+      setNovoAlunoOpen(false)
+      setNovoAlunoForm(EMPTY_ALUNO)
+      reloadAlunos()
+      const nomeExibido = alunoExistente?.nome ?? novoAlunoForm.nome.trim()
+      showToast(alunoExistente
+        ? `✅ "${nomeExibido}" matriculado na nova turma com sucesso!`
+        : `✅ Aluno "${nomeExibido}" cadastrado com sucesso!`, 'success')
     } catch (erro) {
       if (offline || !navigator.onLine) {
+        const payload = { nome: novoAlunoForm.nome.trim(), data_nasc: novoAlunoForm.data_nasc || null, cpf: novoAlunoForm.cpf || null, telefone: novoAlunoForm.telefone || null, telefone_emergencia: novoAlunoForm.telefone_emergencia || null, email: novoAlunoForm.email || null, turma_id: novoAlunoForm.turma_id || null, status: novoAlunoForm.status, genero: novoAlunoForm.genero || null, foto_url: novoAlunoForm.foto_url || null }
         addToQueue({ type: 'aluno', data: payload, turma_id: novoAlunoForm.turma_id, turmaMelhorIdade, atestado_validade: novoAlunoForm.atestado_validade, atestado_foto: novoAlunoForm.atestado_foto })
         setSavingAluno(false)
         setNovoAlunoOpen(false)
@@ -1304,8 +1317,6 @@ export default function PoloDetalhe() {
         setSavingAluno(false)
         const msg = erro?.code === '42501'
           ? 'Você não tem permissão para cadastrar alunos nessa turma. Peça ao coordenador para verificar se você está vinculado a ela.'
-          : erro?.code === '23505'
-          ? 'Esse CPF já está cadastrado. Pesquise o nome do aluno antes de cadastrar novamente.'
           : `Erro inesperado ao salvar. Tente novamente ou avise o suporte: ${erro?.message ?? ''}`
         setNovoAlunoError(msg)
       }
@@ -2683,8 +2694,10 @@ export default function PoloDetalhe() {
 
       <ConfirmDialog
         open={!!dupWarning}
-        title="Aluno possivelmente duplicado"
-        description={`Já existe um aluno com esse CPF neste polo: "${dupWarning?.aluno?.nome}"${dupWarning?.turma ? ` (${dupWarning.turma.modalidades?.nome ?? 'turma'})` : ''}. Deseja cadastrar mesmo assim?`}
+        title="Aluno já cadastrado no sistema"
+        description={`"${dupWarning?.aluno?.nome}" já está cadastrado (mesmo CPF)${dupWarning?.turma ? ` na modalidade ${dupWarning.turma.modalidades?.nome ?? 'turma'}` : ''}. Deseja matriculá-lo na turma selecionada sem criar um novo cadastro?`}
+        confirmLabel="Matricular na turma"
+        confirmVariant="primary"
         onConfirm={() => { setDupWarning(null); salvarNovoAluno(true) }}
         onClose={() => setDupWarning(null)}
       />

@@ -276,15 +276,18 @@ export default function Alunos() {
       setAlunoErrors(errs)
       return
     }
+
     // Duplicate detection by CPF only (names can repeat)
-    if (!editing && !forcarSalvar && form.cpf) {
-      const cpfNorm = form.cpf.replace(/\D/g, '')
-      const dup = cpfNorm.length >= 11 && alunos.find(a => a.cpf && a.cpf.replace(/\D/g, '') === cpfNorm)
-      if (dup) {
-        setDupWarningAlunos({ aluno: dup })
-        return
-      }
+    const cpfNorm = !editing && form.cpf ? form.cpf.replace(/\D/g, '') : ''
+    const alunoExistente = cpfNorm.length >= 11
+      ? alunos.find(a => a.cpf && a.cpf.replace(/\D/g, '') === cpfNorm)
+      : null
+
+    if (!editing && !forcarSalvar && alunoExistente) {
+      setDupWarningAlunos({ aluno: alunoExistente })
+      return
     }
+
     setSaving(true)
     const primeiraTurmaId = matriculas.find(m => m.turma_id)?.turma_id || null
     const payload = {
@@ -295,7 +298,7 @@ export default function Alunos() {
       telefone_emergencia: form.telefone_emergencia || null,
       email: form.email || null,
       endereco: form.endereco || null,
-      turma_id: primeiraTurmaId, // backward compat
+      turma_id: primeiraTurmaId,
       foto_url: form.foto_url || null,
       status: form.status,
       genero: form.genero || null,
@@ -303,14 +306,18 @@ export default function Alunos() {
     const temTurmaMelhorIdade = matriculas.some(m => turmas.find(t => t.id === m.turma_id)?.faixa === 'Melhor Idade')
     try {
       let alunoId = editing?.id
+      const reaproveitandoExistente = !editing && !!alunoExistente
+
       if (editing) {
         const { error: updateErr } = await supabase.from('alunos').update(payload).eq('id', editing.id)
         if (updateErr) throw updateErr
+      } else if (reaproveitandoExistente) {
+        // Aluno já existe — apenas adiciona as novas turmas, sem criar duplicata
+        alunoId = alunoExistente.id
       } else {
         const { data, error: insertErr } = await supabase.from('alunos').insert(payload).select('id').single()
         if (insertErr) throw insertErr
         alunoId = data?.id
-        // Save atestado for new Melhor Idade student
         if (alunoId && temTurmaMelhorIdade && form.atestado_validade) {
           await supabase.from('atestados').insert({
             aluno_id: alunoId,
@@ -319,24 +326,43 @@ export default function Alunos() {
           })
         }
       }
-      // Save aluno_turmas (junction)
+
       if (alunoId) {
-        await supabase.from('aluno_turmas').delete().eq('aluno_id', alunoId)
-        const rows = matriculas.filter(m => m.turma_id).map(m => ({ aluno_id: alunoId, turma_id: m.turma_id }))
-        if (rows.length) {
-          const { error: turmaErr } = await supabase.from('aluno_turmas').insert(rows)
-          if (turmaErr) {
-            console.warn('[aluno_turmas insert]', turmaErr.message)
-            if (turmaErr.code === '42501') {
-              throw { code: '42501', context: 'aluno_turmas' }
+        if (editing || reaproveitandoExistente) {
+          // Edição normal: substitui todas as turmas. Reaproveitamento: apenas adiciona as novas (preserva as antigas)
+          if (editing) {
+            await supabase.from('aluno_turmas').delete().eq('aluno_id', alunoId)
+          }
+          const rows = matriculas.filter(m => m.turma_id).map(m => ({ aluno_id: alunoId, turma_id: m.turma_id }))
+          if (rows.length) {
+            const { error: turmaErr } = await supabase.from('aluno_turmas')
+              .upsert(rows, { onConflict: 'aluno_id,turma_id', ignoreDuplicates: true })
+            if (turmaErr && turmaErr.code !== '23505') {
+              if (turmaErr.code === '42501') throw { code: '42501', context: 'aluno_turmas' }
+              console.warn('[aluno_turmas upsert]', turmaErr.message)
+            }
+          }
+        } else {
+          // Novo aluno: substitui (garante estado limpo)
+          await supabase.from('aluno_turmas').delete().eq('aluno_id', alunoId)
+          const rows = matriculas.filter(m => m.turma_id).map(m => ({ aluno_id: alunoId, turma_id: m.turma_id }))
+          if (rows.length) {
+            const { error: turmaErr } = await supabase.from('aluno_turmas').insert(rows)
+            if (turmaErr) {
+              console.warn('[aluno_turmas insert]', turmaErr.message)
+              if (turmaErr.code === '42501') throw { code: '42501', context: 'aluno_turmas' }
             }
           }
         }
       }
+
       setSaving(false)
       setModalOpen(false)
       reload()
-      showToast(`✅ Aluno "${form.nome.trim()}" ${editing ? 'atualizado' : 'cadastrado'} com sucesso!`, 'success')
+      const nomeExibido = reaproveitandoExistente ? (alunoExistente.nome ?? form.nome.trim()) : form.nome.trim()
+      showToast(reaproveitandoExistente
+        ? `✅ "${nomeExibido}" matriculado nas novas turmas com sucesso!`
+        : `✅ Aluno "${nomeExibido}" ${editing ? 'atualizado' : 'cadastrado'} com sucesso!`, 'success')
     } catch (erro) {
       setSaving(false)
       if (offline || !navigator.onLine) {
@@ -348,8 +374,6 @@ export default function Alunos() {
           ? erro?.context === 'aluno_turmas'
             ? 'Você não tem permissão para matricular alunos nessa turma. Peça ao coordenador para verificar se você está vinculado a ela.'
             : 'Você não tem permissão para cadastrar alunos aqui. Peça ao coordenador para verificar seu acesso ao polo.'
-          : erro?.message?.includes('unique') || erro?.code === '23505'
-          ? 'Esse CPF já está cadastrado. Pesquise o nome do aluno antes de cadastrar novamente.'
           : `Erro inesperado ao salvar. Tente novamente ou avise o suporte: ${erro?.message ?? ''}`
         showToast(msg, 'error')
       }
@@ -962,8 +986,10 @@ export default function Alunos() {
 
       <ConfirmDialog
         open={!!dupWarningAlunos}
-        title="Aluno possivelmente duplicado"
-        description={`Já existe um aluno com esse CPF no sistema: "${dupWarningAlunos?.aluno?.nome}". Deseja cadastrar mesmo assim?`}
+        title="Aluno já cadastrado no sistema"
+        description={`"${dupWarningAlunos?.aluno?.nome}" já está cadastrado com esse CPF. Deseja matriculá-lo nas turmas selecionadas sem criar um novo cadastro?`}
+        confirmLabel="Matricular nas turmas"
+        confirmVariant="primary"
         onConfirm={() => { setDupWarningAlunos(null); handleSave(true) }}
         onClose={() => setDupWarningAlunos(null)}
       />
