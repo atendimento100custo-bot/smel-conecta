@@ -727,9 +727,9 @@ export default function PoloDetalhe() {
   const EMPTY_ALUNO = { nome: '', data_nasc: '', cpf: '', telefone: '', telefone_emergencia: '', email: '', status: 'Ativo', turma_id: '', genero: '', foto_url: '', atestado_validade: '', atestado_foto: '' }
   const [novoAlunoOpen, setNovoAlunoOpen] = useState(false)
   const [novoAlunoForm, setNovoAlunoForm] = useState(EMPTY_ALUNO)
+  const [novoAlunoMatriculas, setNovoAlunoMatriculas] = useState([{ turma_id: '' }])
   const [novoAlunoErrors, setNovoAlunoErrors] = useState({})
   const [dupWarning, setDupWarning] = useState(null) // { aluno, turma }
-  const [filtroModalidadeAluno, setFiltroModalidadeAluno] = useState('')
   const [savingAluno, setSavingAluno] = useState(false)
   const [novoAlunoError, setNovoAlunoError] = useState('')
 
@@ -1254,7 +1254,8 @@ export default function PoloDetalhe() {
   }
 
   async function salvarNovoAluno(forcarSalvar = false) {
-    const erros = validateAlunoForm(novoAlunoForm)
+    const turmasSelecionadas = novoAlunoMatriculas.filter(m => m.turma_id)
+    const erros = validateAlunoForm({ ...novoAlunoForm, turma_id: turmasSelecionadas[0]?.turma_id ?? '' })
     setNovoAlunoErrors(erros)
     if (Object.keys(erros).length > 0) return
 
@@ -1273,13 +1274,13 @@ export default function PoloDetalhe() {
     setDupWarning(null)
     setNovoAlunoError('')
     setSavingAluno(true)
-    const turmaMelhorIdade = turmasPolo.find(t => t.id === novoAlunoForm.turma_id)?.faixa === 'Melhor Idade'
+    const primeiraTurmaId = turmasSelecionadas[0]?.turma_id || null
+    const temTurmaMelhorIdade = turmasSelecionadas.some(m => turmasPolo.find(t => t.id === m.turma_id)?.faixa === 'Melhor Idade')
 
     try {
       let alunoId
 
       if (alunoExistente) {
-        // Aluno já existe — apenas matricula na nova turma, sem criar duplicata
         alunoId = alunoExistente.id
       } else {
         const payload = {
@@ -1289,7 +1290,7 @@ export default function PoloDetalhe() {
           telefone: novoAlunoForm.telefone || null,
           telefone_emergencia: novoAlunoForm.telefone_emergencia || null,
           email: novoAlunoForm.email || null,
-          turma_id: novoAlunoForm.turma_id || null,
+          turma_id: primeiraTurmaId,
           status: novoAlunoForm.status,
           genero: novoAlunoForm.genero || null,
           foto_url: novoAlunoForm.foto_url || null,
@@ -1301,7 +1302,7 @@ export default function PoloDetalhe() {
           return
         }
         alunoId = data.id
-        if (turmaMelhorIdade && novoAlunoForm.atestado_validade) {
+        if (temTurmaMelhorIdade && novoAlunoForm.atestado_validade) {
           await supabase.from('atestados').insert({
             aluno_id: alunoId,
             data_validade: novoAlunoForm.atestado_validade,
@@ -1310,30 +1311,33 @@ export default function PoloDetalhe() {
         }
       }
 
-      const turmaAluno = turmasPolo.find(t => t.id === novoAlunoForm.turma_id)
+      const turmaAluno = turmasPolo.find(t => t.id === primeiraTurmaId)
       logAcao({ acao: 'cadastro_aluno', perfil: profile, polo, turma: turmaAluno, aluno: { id: alunoId, nome: alunoExistente?.nome ?? novoAlunoForm.nome.trim() } })
 
-      if (novoAlunoForm.turma_id) {
+      if (turmasSelecionadas.length > 0) {
+        const rows = turmasSelecionadas.map(m => ({ aluno_id: alunoId, turma_id: m.turma_id }))
         const { error: turmaErr } = await supabase.from('aluno_turmas')
-          .upsert({ aluno_id: alunoId, turma_id: novoAlunoForm.turma_id }, { onConflict: 'aluno_id,turma_id', ignoreDuplicates: true })
+          .upsert(rows, { onConflict: 'aluno_id,turma_id', ignoreDuplicates: true })
         if (turmaErr && turmaErr.code !== '23505') throw turmaErr
       }
 
       setSavingAluno(false)
       setNovoAlunoOpen(false)
       setNovoAlunoForm(EMPTY_ALUNO)
+      setNovoAlunoMatriculas([{ turma_id: '' }])
       reloadAlunos()
       const nomeExibido = alunoExistente?.nome ?? novoAlunoForm.nome.trim()
       showToast(alunoExistente
-        ? `✅ "${nomeExibido}" matriculado na nova turma com sucesso!`
+        ? `✅ "${nomeExibido}" matriculado nas turmas com sucesso!`
         : `✅ Aluno "${nomeExibido}" cadastrado com sucesso!`, 'success')
     } catch (erro) {
       if (offline || !navigator.onLine) {
-        const payload = { nome: novoAlunoForm.nome.trim(), data_nasc: novoAlunoForm.data_nasc || null, cpf: novoAlunoForm.cpf || null, telefone: novoAlunoForm.telefone || null, telefone_emergencia: novoAlunoForm.telefone_emergencia || null, email: novoAlunoForm.email || null, turma_id: novoAlunoForm.turma_id || null, status: novoAlunoForm.status, genero: novoAlunoForm.genero || null, foto_url: novoAlunoForm.foto_url || null }
-        addToQueue({ type: 'aluno', data: payload, turma_id: novoAlunoForm.turma_id, turmaMelhorIdade, atestado_validade: novoAlunoForm.atestado_validade, atestado_foto: novoAlunoForm.atestado_foto })
+        const payload = { nome: novoAlunoForm.nome.trim(), data_nasc: novoAlunoForm.data_nasc || null, cpf: novoAlunoForm.cpf || null, telefone: novoAlunoForm.telefone || null, telefone_emergencia: novoAlunoForm.telefone_emergencia || null, email: novoAlunoForm.email || null, turma_id: primeiraTurmaId, status: novoAlunoForm.status, genero: novoAlunoForm.genero || null, foto_url: novoAlunoForm.foto_url || null }
+        addToQueue({ type: 'aluno', data: payload, turma_id: primeiraTurmaId, turmaMelhorIdade: temTurmaMelhorIdade, atestado_validade: novoAlunoForm.atestado_validade, atestado_foto: novoAlunoForm.atestado_foto })
         setSavingAluno(false)
         setNovoAlunoOpen(false)
         setNovoAlunoForm(EMPTY_ALUNO)
+        setNovoAlunoMatriculas([{ turma_id: '' }])
       } else {
         console.error('Erro ao salvar aluno:', erro)
         setSavingAluno(false)
@@ -2437,7 +2441,7 @@ export default function PoloDetalhe() {
       </Modal>
 
       {/* Modal Novo Aluno (direto do polo) */}
-      <Modal open={novoAlunoOpen} onClose={() => { setNovoAlunoOpen(false); setFiltroModalidadeAluno(''); setNovoAlunoErrors({}); setDupWarning(null) }} title="Novo Aluno" size="lg">
+      <Modal open={novoAlunoOpen} onClose={() => { setNovoAlunoOpen(false); setNovoAlunoMatriculas([{ turma_id: '' }]); setNovoAlunoErrors({}); setDupWarning(null) }} title="Novo Aluno" size="lg">
         <div className="space-y-3">
 
           {/* Foto do aluno */}
@@ -2540,45 +2544,42 @@ export default function PoloDetalhe() {
               </select>
             </div>
           </div>
-          {/* Turma — seleção hierárquica: modalidade → turma */}
-          {(() => {
-            const modalidadesPolo = [...new Map(turmasPolo.map(t => [t.modalidade_id, t.modalidades?.nome]).filter(([id]) => id)).values()]
-            const temMultiplasModalidades = modalidadesPolo.length > 1
-            const turmasFiltradas = filtroModalidadeAluno
-              ? turmasPolo.filter(t => t.modalidades?.nome === filtroModalidadeAluno)
-              : turmasPolo
-            return (
-              <div className="space-y-2">
-                {temMultiplasModalidades && (
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Modalidade</label>
-                    <select value={filtroModalidadeAluno}
-                      onChange={e => { setFiltroModalidadeAluno(e.target.value); setNovoAlunoForm(f => ({ ...f, turma_id: '' })) }}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500">
-                      <option value="">Todas as modalidades</option>
-                      {modalidadesPolo.map(nome => <option key={nome} value={nome}>{nome}</option>)}
+          {/* Turmas (multi) */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Turmas (neste polo) <span className="text-red-400">*</span></label>
+            <div className="space-y-2">
+              {novoAlunoMatriculas.map((m, idx) => {
+                const selecionadas = new Set(novoAlunoMatriculas.map(x => x.turma_id).filter(Boolean))
+                return (
+                  <div key={idx} className="flex gap-2 items-center">
+                    <select
+                      value={m.turma_id}
+                      onChange={e => { setNovoAlunoMatriculas(prev => prev.map((x, i) => i === idx ? { turma_id: e.target.value } : x)); setNovoAlunoErrors(e2 => ({ ...e2, turma_id: undefined })) }}
+                      className={`flex-1 px-3 py-2 rounded-lg border text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 ${novoAlunoErrors.turma_id && idx === 0 ? 'border-red-400 dark:border-red-500 ring-1 ring-red-400' : 'border-slate-200 dark:border-navy-600'}`}
+                    >
+                      <option value="">— Selecione uma turma —</option>
+                      {turmasPolo.filter(t => t.status === 'Ativa').sort((a, b) => (a.modalidades?.nome ?? '').localeCompare(b.modalidades?.nome ?? '', 'pt-BR')).map(t =>
+                        (!selecionadas.has(t.id) || t.id === m.turma_id) && (
+                          <option key={t.id} value={t.id}>{t.modalidades?.emoji} {t.modalidades?.nome} · {t.faixa} · {t.dias?.join('/')} {t.horario?.slice(0, 5)}</option>
+                        )
+                      )}
                     </select>
+                    {novoAlunoMatriculas.length > 1 && (
+                      <button type="button" onClick={() => setNovoAlunoMatriculas(prev => prev.filter((_, i) => i !== idx))}
+                        className="text-slate-400 hover:text-red-500 transition-colors text-lg leading-none px-1">×</button>
+                    )}
                   </div>
-                )}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Turma (neste polo) <span className="text-red-400">*</span></label>
-                  <select value={novoAlunoForm.turma_id}
-                    onChange={e => { setNovoAlunoForm(f => ({ ...f, turma_id: e.target.value })); setNovoAlunoErrors(e2 => ({ ...e2, turma_id: undefined })) }}
-                    className={`w-full px-3 py-2 rounded-lg border text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 ${novoAlunoErrors.turma_id ? 'border-red-400 dark:border-red-500 ring-1 ring-red-400' : 'border-slate-200 dark:border-navy-600'}`}>
-                    <option value="">— Selecione uma turma —</option>
-                    {turmasFiltradas.map(t => (
-                      <option key={t.id} value={t.id}>
-                        {[!temMultiplasModalidades || filtroModalidadeAluno ? null : t.modalidades?.nome, t.faixa, t.dias?.join(','), t.horario?.slice(0,5)].filter(Boolean).join(' · ')}
-                      </option>
-                    ))}
-                  </select>
-                  {novoAlunoErrors.turma_id && <p className="text-[11px] text-red-500 mt-1">⚠ {novoAlunoErrors.turma_id}</p>}
-                </div>
-              </div>
-            )
-          })()}
+                )
+              })}
+            </div>
+            {novoAlunoErrors.turma_id && <p className="text-[11px] text-red-500 mt-1">⚠ {novoAlunoErrors.turma_id}</p>}
+            {novoAlunoMatriculas.every(m => m.turma_id) && novoAlunoMatriculas.length < turmasPolo.filter(t => t.status === 'Ativa').length && (
+              <button type="button" onClick={() => setNovoAlunoMatriculas(prev => [...prev, { turma_id: '' }])}
+                className="mt-2 text-xs text-primary-600 hover:text-primary-700 font-medium">+ Adicionar outra turma neste polo</button>
+            )}
+          </div>
           {/* Atestado médico — somente para turmas Melhor Idade */}
-          {turmasPolo.find(t => t.id === novoAlunoForm.turma_id)?.faixa === 'Melhor Idade' && (
+          {novoAlunoMatriculas.some(m => turmasPolo.find(t => t.id === m.turma_id)?.faixa === 'Melhor Idade') && (
             <div className="rounded-xl border border-amber-200 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-900/10 p-3 space-y-3">
               <p className="text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wide">🏥 Atestado Médico — Melhor Idade</p>
               <div>
@@ -2620,7 +2621,7 @@ export default function PoloDetalhe() {
           )}
 
           <div className="flex gap-2 justify-end pt-2">
-            <Button variant="secondary" size="sm" onClick={() => { setNovoAlunoOpen(false); setFiltroModalidadeAluno(''); setNovoAlunoErrors({}); setDupWarning(null); setNovoAlunoError('') }}>Cancelar</Button>
+            <Button variant="secondary" size="sm" onClick={() => { setNovoAlunoOpen(false); setNovoAlunoMatriculas([{ turma_id: '' }]); setNovoAlunoErrors({}); setDupWarning(null); setNovoAlunoError('') }}>Cancelar</Button>
             <Button size="sm" onClick={() => salvarNovoAluno()} disabled={savingAluno}>
               {savingAluno ? 'Salvando...' : 'Salvar'}
             </Button>
