@@ -1419,7 +1419,7 @@ export default function PoloDetalhe() {
                   <Button size="sm" variant="secondary" onClick={openNovoFunc}>
                     <UserPlus size={13}/> <span className="hidden sm:inline">Novo Funcionário</span>
                   </Button>
-                  <Button size="sm" onClick={() => { setNovoAlunoForm(EMPTY_ALUNO); setFiltroModalidadeAluno(''); setNovoAlunoOpen(true) }}>
+                  <Button size="sm" onClick={() => { setNovoAlunoForm(EMPTY_ALUNO); setNovoAlunoMatriculas([{ turma_id: '' }]); setNovoAlunoOpen(true) }}>
                     <Plus size={13}/> <span className="hidden sm:inline">Novo Aluno</span>
                   </Button>
                 </>
