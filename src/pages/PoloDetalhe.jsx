@@ -2558,11 +2558,9 @@ export default function PoloDetalhe() {
                       className={`flex-1 px-3 py-2 rounded-lg border text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 ${novoAlunoErrors.turma_id && idx === 0 ? 'border-red-400 dark:border-red-500 ring-1 ring-red-400' : 'border-slate-200 dark:border-navy-600'}`}
                     >
                       <option value="">— Selecione uma turma —</option>
-                      {turmasPolo.filter(t => t.status === 'Ativa').sort((a, b) => (a.modalidades?.nome ?? '').localeCompare(b.modalidades?.nome ?? '', 'pt-BR')).map(t =>
-                        (!selecionadas.has(t.id) || t.id === m.turma_id) && (
-                          <option key={t.id} value={t.id}>{t.modalidades?.emoji} {t.modalidades?.nome} · {t.faixa} · {t.dias?.join('/')} {t.horario?.slice(0, 5)}</option>
-                        )
-                      )}
+                      {turmasPolo.filter(t => t.status === 'Ativa' && (!selecionadas.has(t.id) || t.id === m.turma_id)).sort((a, b) => (a.modalidades?.nome ?? '').localeCompare(b.modalidades?.nome ?? '', 'pt-BR')).map(t => (
+                        <option key={t.id} value={t.id}>{t.modalidades?.emoji} {t.modalidades?.nome} · {t.faixa} · {t.dias?.join('/')} {t.horario?.slice(0, 5)}</option>
+                      ))}
                     </select>
                     {novoAlunoMatriculas.length > 1 && (
                       <button type="button" onClick={() => setNovoAlunoMatriculas(prev => prev.filter((_, i) => i !== idx))}
@@ -2750,10 +2748,8 @@ export default function PoloDetalhe() {
                       className={`flex-1 px-3 py-2 rounded-lg border text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 ${editAlunoErrors.turma_id && idx === 0 ? 'border-red-400' : 'border-slate-200 dark:border-navy-600'}`}
                     >
                       <option value="">Selecione uma turma...</option>
-                      {turmasPolo.filter(t => t.status === 'Ativa').sort((a, b) => (a.modalidades?.nome ?? '').localeCompare(b.modalidades?.nome ?? '', 'pt-BR')).map(t => (
-                        (!selecionadas.has(t.id) || t.id === m.turma_id) && (
-                          <option key={t.id} value={t.id}>{t.modalidades?.emoji} {t.modalidades?.nome} · {t.dias?.join('/')} {t.horario?.slice(0, 5)} ({t.faixa})</option>
-                        )
+                      {turmasPolo.filter(t => t.status === 'Ativa' && (!selecionadas.has(t.id) || t.id === m.turma_id)).sort((a, b) => (a.modalidades?.nome ?? '').localeCompare(b.modalidades?.nome ?? '', 'pt-BR')).map(t => (
+                        <option key={t.id} value={t.id}>{t.modalidades?.emoji} {t.modalidades?.nome} · {t.dias?.join('/')} {t.horario?.slice(0, 5)} ({t.faixa})</option>
                       ))}
                     </select>
                     {editAlunoMatriculas.length > 1 && (
