@@ -774,6 +774,7 @@ export default function PoloDetalhe() {
   const [editAlunoOpen, setEditAlunoOpen] = useState(false)
   const [editAlunoId, setEditAlunoId] = useState(null)
   const [editAlunoForm, setEditAlunoForm] = useState(EMPTY_ALUNO)
+  const [editAlunoMatriculas, setEditAlunoMatriculas] = useState([{ turma_id: '' }])
   const [editAlunoErrors, setEditAlunoErrors] = useState({})
   const [savingEditAluno, setSavingEditAluno] = useState(false)
 
@@ -1156,15 +1157,25 @@ export default function PoloDetalhe() {
       atestado_validade: '',
       atestado_foto: '',
     })
+    // Carrega turmas do aluno filtradas a este polo; fallback para turma_id legado
+    const turmasPoloIds = new Set(turmasPolo.map(t => t.id))
+    const matriculasNestePolo = (a.aluno_turmas ?? []).filter(at => turmasPoloIds.has(at.turma_id))
+    setEditAlunoMatriculas(
+      matriculasNestePolo.length > 0
+        ? matriculasNestePolo.map(at => ({ turma_id: at.turma_id }))
+        : [{ turma_id: a.turma_id ?? '' }]
+    )
     setEditAlunoErrors({})
     setEditAlunoOpen(true)
   }
 
   async function salvarEditAluno() {
-    const erros = validateAlunoForm(editAlunoForm)
+    const novasMatriculas = editAlunoMatriculas.filter(m => m.turma_id)
+    const erros = validateAlunoForm({ ...editAlunoForm, turma_id: novasMatriculas[0]?.turma_id ?? '' })
     setEditAlunoErrors(erros)
     if (Object.keys(erros).length > 0) return
     setSavingEditAluno(true)
+    const primeiraTurmaId = novasMatriculas[0]?.turma_id || null
     try {
       const { error: saveErr } = await supabase.from('alunos').update({
         nome: editAlunoForm.nome.trim(),
@@ -1173,15 +1184,26 @@ export default function PoloDetalhe() {
         telefone: editAlunoForm.telefone || null,
         telefone_emergencia: editAlunoForm.telefone_emergencia || null,
         email: editAlunoForm.email || null,
-        turma_id: editAlunoForm.turma_id || null,
+        turma_id: primeiraTurmaId,
         status: editAlunoForm.status,
         genero: editAlunoForm.genero || null,
         foto_url: editAlunoForm.foto_url || null,
       }).eq('id', editAlunoId)
       if (saveErr) throw saveErr
+
+      // Substitui aluno_turmas apenas para turmas deste polo (preserva outros polos)
+      const turmasPoloIds = turmasPolo.map(t => t.id)
+      await supabase.from('aluno_turmas').delete().eq('aluno_id', editAlunoId).in('turma_id', turmasPoloIds)
+      if (novasMatriculas.length > 0) {
+        const rows = novasMatriculas.map(m => ({ aluno_id: editAlunoId, turma_id: m.turma_id }))
+        const { error: turmaErr } = await supabase.from('aluno_turmas').insert(rows)
+        if (turmaErr && turmaErr.code !== '23505') throw turmaErr
+      }
+
       setSavingEditAluno(false)
       setEditAlunoOpen(false)
       reloadAlunos()
+      showToast(`✅ Aluno "${editAlunoForm.nome.trim()}" atualizado com sucesso!`, 'success')
     } catch (erro) {
       setSavingEditAluno(false)
       const msg = erro?.code === '42501'
@@ -2713,17 +2735,39 @@ export default function PoloDetalhe() {
             {editAlunoErrors.nome && <p className="text-[10px] text-red-500 mt-1">{editAlunoErrors.nome}</p>}
           </div>
 
-          {/* Turma */}
+          {/* Turmas (multi) */}
           <div>
-            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Turma *</label>
-            <select value={editAlunoForm.turma_id} onChange={e => setEditAlunoForm(f => ({ ...f, turma_id: e.target.value }))}
-              className={`w-full px-3 py-2 rounded-lg border text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 ${editAlunoErrors.turma_id ? 'border-red-400' : 'border-slate-200 dark:border-navy-600'}`}>
-              <option value="">Selecione uma turma...</option>
-              {turmasPolo.filter(t => t.status === 'Ativa').sort((a,b) => (a.modalidades?.nome ?? '').localeCompare(b.modalidades?.nome ?? '', 'pt-BR')).map(t => (
-                <option key={t.id} value={t.id}>{t.modalidades?.emoji} {t.modalidades?.nome} · {t.dias?.join('/')} {t.horario?.slice(0,5)} ({t.faixa})</option>
-              ))}
-            </select>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Turmas *</label>
+            <div className="space-y-2">
+              {editAlunoMatriculas.map((m, idx) => {
+                const selecionadas = new Set(editAlunoMatriculas.map(x => x.turma_id).filter(Boolean))
+                return (
+                  <div key={idx} className="flex gap-2 items-center">
+                    <select
+                      value={m.turma_id}
+                      onChange={e => setEditAlunoMatriculas(prev => prev.map((x, i) => i === idx ? { turma_id: e.target.value } : x))}
+                      className={`flex-1 px-3 py-2 rounded-lg border text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 ${editAlunoErrors.turma_id && idx === 0 ? 'border-red-400' : 'border-slate-200 dark:border-navy-600'}`}
+                    >
+                      <option value="">Selecione uma turma...</option>
+                      {turmasPolo.filter(t => t.status === 'Ativa').sort((a, b) => (a.modalidades?.nome ?? '').localeCompare(b.modalidades?.nome ?? '', 'pt-BR')).map(t => (
+                        (!selecionadas.has(t.id) || t.id === m.turma_id) && (
+                          <option key={t.id} value={t.id}>{t.modalidades?.emoji} {t.modalidades?.nome} · {t.dias?.join('/')} {t.horario?.slice(0, 5)} ({t.faixa})</option>
+                        )
+                      ))}
+                    </select>
+                    {editAlunoMatriculas.length > 1 && (
+                      <button type="button" onClick={() => setEditAlunoMatriculas(prev => prev.filter((_, i) => i !== idx))}
+                        className="text-slate-400 hover:text-red-500 transition-colors text-lg leading-none">×</button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
             {editAlunoErrors.turma_id && <p className="text-[10px] text-red-500 mt-1">{editAlunoErrors.turma_id}</p>}
+            {editAlunoMatriculas.every(m => m.turma_id) && editAlunoMatriculas.length < turmasPolo.filter(t => t.status === 'Ativa').length && (
+              <button type="button" onClick={() => setEditAlunoMatriculas(prev => [...prev, { turma_id: '' }])}
+                className="mt-2 text-xs text-primary-600 hover:text-primary-700 font-medium">+ Adicionar outra turma neste polo</button>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
