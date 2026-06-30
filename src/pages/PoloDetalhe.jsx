@@ -601,16 +601,13 @@ export default function PoloDetalhe() {
   const { data: alunos, reload: reloadAlunos } = useSupabaseData('alunos', 'id,nome,status,turma_id,data_nasc,data_matricula,cpf,telefone,telefone_emergencia,email,genero,foto_url,aluno_turmas(turma_id)')
   // Busca apenas os últimos 90 dias para evitar o limite de 10k linhas do hook genérico
   const [presencas, setPresencas] = useState([])
-  const carregarHistoricoCompleto = useCallback(async (turmaIdsArr) => {
-    if (!turmaIdsArr || turmaIdsArr.length === 0) return
+  const carregarEngajamento = useCallback(async () => {
+    if (engajamentoRpc !== null || !id) return
     setLoadingHist(true)
-    const { data } = await supabase
-      .from('presencas')
-      .select('id,data,status,turma_id,aluno_id')
-      .in('turma_id', turmaIdsArr)
-    setPresencasHist(data ?? [])
+    const { data, error } = await supabase.rpc('engajamento_polo', { p_polo_id: id })
+    if (!error) setEngajamentoRpc(data ?? [])
     setLoadingHist(false)
-  }, [])
+  }, [engajamentoRpc, id])
 
   const reloadPresencas = useCallback(async () => {
     const since = format(subDays(new Date(), 90), 'yyyy-MM-dd')
@@ -742,7 +739,7 @@ export default function PoloDetalhe() {
   const [novoAlunoErrors, setNovoAlunoErrors] = useState({})
   const [opTab, setOpTab] = useState('hoje')
   const [alunosTab, setAlunosTab] = useState('lista')
-  const [presencasHist, setPresencasHist] = useState(null) // null = ainda não carregado
+  const [engajamentoRpc, setEngajamentoRpc] = useState(null) // null = ainda não carregado
   const [loadingHist, setLoadingHist] = useState(false)
   const [dupWarning, setDupWarning] = useState(null) // { aluno, turma }
   const [savingAluno, setSavingAluno] = useState(false)
@@ -995,13 +992,36 @@ export default function PoloDetalhe() {
   }, [turmasPolo])
 
   // Engajamento — ranking de assiduidade dos alunos ativos do polo
-  // Usa histórico completo quando carregado; fallback para 90 dias
+  // Quando a RPC está disponível: dados pré-calculados no banco (histórico completo).
+  // Fallback: cálculo local sobre os últimos 90 dias carregados no estado.
   const engajamento = useMemo(() => {
-    const fonte = presencasHist ?? presencasPolo
+    if (engajamentoRpc !== null) {
+      const rpcMap = new Map(engajamentoRpc.map(r => [r.aluno_id, r]))
+      return alunosPolo
+        .filter(a => a.status === 'Ativo')
+        .map(a => {
+          const r = rpcMap.get(a.id)
+          return {
+            ...a,
+            freq: r?.freq_pct ?? null,
+            total: Number(r?.total_aulas ?? 0),
+            presentes: Number(r?.aulas_presente ?? 0),
+            ultimaPresente: r?.ultima_presenca ?? null,
+            diasAfastado: r?.dias_afastado ?? null,
+          }
+        })
+        .sort((a, b) => {
+          if (a.freq === null && b.freq === null) return 0
+          if (a.freq === null) return 1
+          if (b.freq === null) return -1
+          return b.freq - a.freq
+        })
+    }
+    // fallback local — 90 dias
     return alunosPolo
       .filter(a => a.status === 'Ativo')
       .map(a => {
-        const pAluno = fonte.filter(p => p.aluno_id === a.id)
+        const pAluno = presencasPolo.filter(p => p.aluno_id === a.id)
         const total = pAluno.length
         const presentes = pAluno.filter(p => p.status === 'presente' || p.status === 'justificado').length
         const freq = total > 0 ? Math.round((presentes / total) * 100) : null
@@ -1019,7 +1039,7 @@ export default function PoloDetalhe() {
         if (b.freq === null) return -1
         return b.freq - a.freq
       })
-  }, [alunosPolo, presencasPolo, presencasHist])
+  }, [alunosPolo, presencasPolo, engajamentoRpc])
 
   // Equipe — une professores (via professor_id nas turmas) + staff via atribuicoes
   const equipe = useMemo(() => {
@@ -2183,9 +2203,7 @@ export default function PoloDetalhe() {
               ].map(st => (
                 <button key={st.id} onClick={() => {
                   setAlunosTab(st.id)
-                  if (st.id === 'engajamento' && presencasHist === null) {
-                    carregarHistoricoCompleto(turmasPolo.map(t => t.id))
-                  }
+                  if (st.id === 'engajamento') carregarEngajamento()
                 }}
                   className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                     alunosTab === st.id
@@ -2334,21 +2352,21 @@ export default function PoloDetalhe() {
                 <div className="flex items-center justify-between mb-3">
                   {loadingHist ? (
                     <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium uppercase tracking-widest animate-pulse">
-                      Carregando histórico completo...
+                      Calculando histórico completo...
                     </p>
                   ) : (
                     <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium uppercase tracking-widest">
                       {engajamento.length} aluno{engajamento.length !== 1 ? 's' : ''} ativos ·{' '}
-                      {presencasHist !== null
-                        ? `histórico completo (${presencasHist.filter(p => turmaIds.has(p.turma_id)).length} registros)`
-                        : 'frequência dos últimos 90 dias'}
+                      {engajamentoRpc !== null
+                        ? 'histórico completo · calculado no banco'
+                        : 'últimos 90 dias · aplique a função RPC para histórico completo'}
                     </p>
                   )}
                 </div>
                 {loadingHist ? (
                   <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 py-12 flex flex-col items-center gap-3">
                     <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
-                    <p className="text-xs text-slate-400 dark:text-slate-500">Buscando histórico completo de presenças...</p>
+                    <p className="text-xs text-slate-400 dark:text-slate-500">Calculando frequência de todo o histórico no banco...</p>
                   </div>
                 ) : engajamento.length === 0 ? (
                   <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 py-12 flex flex-col items-center gap-3">
