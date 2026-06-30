@@ -601,6 +601,11 @@ export default function PoloDetalhe() {
   const { data: alunos, reload: reloadAlunos } = useSupabaseData('alunos', 'id,nome,status,turma_id,data_nasc,data_matricula,cpf,telefone,telefone_emergencia,email,genero,foto_url,aluno_turmas(turma_id)')
   // Busca apenas os últimos 90 dias para evitar o limite de 10k linhas do hook genérico
   const [presencas, setPresencas] = useState([])
+  const [opTab, setOpTab] = useState('hoje')
+  const [alunosTab, setAlunosTab] = useState('lista')
+  const [engajamentoRpc, setEngajamentoRpc] = useState(null)
+  const [loadingHist, setLoadingHist] = useState(false)
+
   const carregarEngajamento = useCallback(async () => {
     if (engajamentoRpc !== null || !id) return
     setLoadingHist(true)
@@ -737,10 +742,6 @@ export default function PoloDetalhe() {
   const [novoAlunoForm, setNovoAlunoForm] = useState(EMPTY_ALUNO)
   const [novoAlunoMatriculas, setNovoAlunoMatriculas] = useState([{ turma_id: '' }])
   const [novoAlunoErrors, setNovoAlunoErrors] = useState({})
-  const [opTab, setOpTab] = useState('hoje')
-  const [alunosTab, setAlunosTab] = useState('lista')
-  const [engajamentoRpc, setEngajamentoRpc] = useState(null) // null = ainda não carregado
-  const [loadingHist, setLoadingHist] = useState(false)
   const [dupWarning, setDupWarning] = useState(null) // { aluno, turma }
   const [savingAluno, setSavingAluno] = useState(false)
   const [novoAlunoError, setNovoAlunoError] = useState('')
