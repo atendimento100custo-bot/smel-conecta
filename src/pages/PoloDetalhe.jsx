@@ -2381,7 +2381,7 @@ export default function PoloDetalhe() {
                       <p className="col-span-4 text-[10px] font-bold uppercase tracking-widest text-slate-400">Aluno</p>
                       <p className="col-span-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Frequência</p>
                       <p className="col-span-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 text-center">Aulas</p>
-                      <p className="col-span-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 text-center">Afastado</p>
+                      <p className="col-span-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 text-center">Última vez</p>
                     </div>
                     <div className="divide-y divide-slate-100 dark:divide-navy-700">
                       {engajamento.map((a, idx) => {
