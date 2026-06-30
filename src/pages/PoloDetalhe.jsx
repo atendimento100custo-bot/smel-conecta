@@ -729,6 +729,8 @@ export default function PoloDetalhe() {
   const [novoAlunoForm, setNovoAlunoForm] = useState(EMPTY_ALUNO)
   const [novoAlunoMatriculas, setNovoAlunoMatriculas] = useState([{ turma_id: '' }])
   const [novoAlunoErrors, setNovoAlunoErrors] = useState({})
+  const [opTab, setOpTab] = useState('hoje')
+  const [alunosTab, setAlunosTab] = useState('lista')
   const [dupWarning, setDupWarning] = useState(null) // { aluno, turma }
   const [savingAluno, setSavingAluno] = useState(false)
   const [novoAlunoError, setNovoAlunoError] = useState('')
@@ -978,6 +980,31 @@ export default function PoloDetalhe() {
     })
     return Object.values(map)
   }, [turmasPolo])
+
+  // Engajamento — ranking de assiduidade dos alunos ativos do polo
+  const engajamento = useMemo(() => {
+    return alunosPolo
+      .filter(a => a.status === 'Ativo')
+      .map(a => {
+        const pAluno = presencasPolo.filter(p => p.aluno_id === a.id)
+        const total = pAluno.length
+        const presentes = pAluno.filter(p => p.status === 'presente' || p.status === 'justificado').length
+        const freq = total > 0 ? Math.round((presentes / total) * 100) : null
+        const ultimaPresente = pAluno
+          .filter(p => p.status === 'presente')
+          .sort((x, y) => (y.data ?? '').localeCompare(x.data ?? ''))[0]?.data ?? null
+        const diasAfastado = ultimaPresente
+          ? Math.floor((new Date() - new Date(ultimaPresente + 'T12:00:00')) / (1000 * 60 * 60 * 24))
+          : null
+        return { ...a, freq, total, presentes, ultimaPresente, diasAfastado }
+      })
+      .sort((a, b) => {
+        if (a.freq === null && b.freq === null) return 0
+        if (a.freq === null) return 1
+        if (b.freq === null) return -1
+        return b.freq - a.freq
+      })
+  }, [alunosPolo, presencasPolo])
 
   // Equipe — une professores (via professor_id nas turmas) + staff via atribuicoes
   const equipe = useMemo(() => {
@@ -1539,59 +1566,32 @@ export default function PoloDetalhe() {
               </div>
             </div>
 
-            {/* Modalidades e Turmas — agrupado e colapsável */}
+            {/* Modalidades — cards compactos clicáveis para Operacional */}
             {porModalidade.length > 0 && (
               <div>
-                <p className="text-xs font-bold text-slate-400 dark:text-slate-600 uppercase tracking-widest mb-3">Modalidades e Turmas</p>
-                <div className="space-y-2">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-bold text-slate-400 dark:text-slate-600 uppercase tracking-widest">Modalidades</p>
+                  <button onClick={() => setTab('operacional')}
+                    className="text-[10px] font-semibold text-primary-600 hover:text-primary-700 dark:text-primary-400 transition-colors">
+                    Ver todas →
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {porModalidade.map(mod => {
                     const totalAlunos = mod.turmas.reduce((s, t) => s + alunos.filter(a => a.turma_id === t.id && a.status === 'Ativo').length, 0)
-                    const aberto = expandidos.has('geral-' + mod.nome)
+                    const turmasAtivas = mod.turmas.filter(t => t.status === 'Ativa').length
                     return (
-                      <div key={mod.nome} className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 overflow-hidden">
-                        {/* Cabeçalho clicável */}
-                        <button onClick={() => toggleColapso('geral-' + mod.nome)}
-                          className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-navy-700 transition-colors text-left">
-                          <span className="text-xl shrink-0">{mod.emoji}</span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-bold text-navy-900 dark:text-white">{mod.nome}</p>
-                            <p className="text-[10px] text-slate-400 dark:text-slate-500">
-                              {mod.turmas.length} turma{mod.turmas.length !== 1 ? 's' : ''} · {totalAlunos} aluno{totalAlunos !== 1 ? 's' : ''} ativo{totalAlunos !== 1 ? 's' : ''}
-                            </p>
-                          </div>
-                          <ChevronRight size={14} className={`text-slate-400 shrink-0 transition-transform duration-200 ${aberto ? 'rotate-90' : ''}`} />
-                        </button>
-                        {/* Turmas */}
-                        {aberto && (
-                          <div className="px-3 pb-3 border-t border-slate-100 dark:border-navy-700 pt-3">
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                              {mod.turmas.map(t => {
-                                const cnt = alunos.filter(a => a.turma_id === t.id && a.status === 'Ativo').length
-                                const ocup = t.capacidade ? Math.round((cnt / t.capacidade) * 100) : 0
-                                return (
-                                  <button key={t.id} onClick={() => navigate(`/alunos?turma_id=${t.id}`)}
-                                    className="text-left p-2.5 rounded-lg bg-slate-50 dark:bg-navy-700 hover:bg-primary-50 dark:hover:bg-primary-900/20 border border-transparent hover:border-primary-200 dark:hover:border-primary-700 transition-all group">
-                                    <div className="flex items-center justify-between mb-1.5">
-                                      <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${t.status === 'Ativa' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-slate-200 text-slate-500 dark:bg-navy-600 dark:text-slate-400'}`}>{t.status}</span>
-                                      <span className="text-[9px] font-semibold text-primary-600 opacity-0 group-hover:opacity-100 transition-opacity">Ver →</span>
-                                    </div>
-                                    <p className="text-[10px] font-semibold text-navy-800 dark:text-slate-200 mb-1">{t.faixa}{t.faixa_etaria ? ` · ${t.faixa_etaria}` : ''}</p>
-                                    <div className="flex items-center gap-1 text-[9px] text-slate-500 dark:text-slate-400">
-                                      <Clock size={8}/>{t.dias?.join(', ') || '—'} · {t.horario?.slice(0,5)}
-                                    </div>
-                                    <div className="flex items-center justify-between mt-1.5">
-                                      <span className="text-[9px] text-slate-500 dark:text-slate-400 flex items-center gap-1"><Users size={8}/>{cnt}/{t.capacidade}</span>
-                                      <div className="w-12 h-1 bg-slate-200 dark:bg-navy-600 rounded-full overflow-hidden">
-                                        <div className="h-full bg-primary-500 rounded-full" style={{ width: `${ocup}%` }}/>
-                                      </div>
-                                    </div>
-                                  </button>
-                                )
-                              })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
+                      <button key={mod.nome}
+                        onClick={() => { setTab('operacional'); setOpTab('turmas') }}
+                        className="flex items-center gap-3 p-3 bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 hover:border-primary-300 dark:hover:border-primary-600 hover:shadow-sm transition-all text-left">
+                        <span className="text-2xl shrink-0">{mod.emoji}</span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-navy-900 dark:text-white truncate">{mod.nome}</p>
+                          <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                            {turmasAtivas} turma{turmasAtivas !== 1 ? 's' : ''} · {totalAlunos} aluno{totalAlunos !== 1 ? 's' : ''}
+                          </p>
+                        </div>
+                      </button>
                     )
                   })}
                 </div>
@@ -1604,13 +1604,26 @@ export default function PoloDetalhe() {
         {/* ─── OPERACIONAL ──────────────────────────────────────────── */}
         {tab === 'operacional' && (
           <div className="space-y-4">
-            {canEditPolo && (
-              <div className="flex justify-end">
-                <Button size="sm" onClick={() => { setEditTurmaId(null); setTurmaForm(EMPTY_TURMA_FORM); setTurmaModalOpen(true) }}>
-                  <Plus size={13}/> Nova Turma
-                </Button>
-              </div>
-            )}
+            {/* Sub-tabs */}
+            <div className="flex gap-1 bg-slate-100 dark:bg-navy-800 p-1 rounded-xl w-fit">
+              {[
+                { id: 'hoje', label: 'Hoje' },
+                { id: 'turmas', label: 'Turmas' },
+                { id: 'historico', label: 'Histórico' },
+              ].map(st => (
+                <button key={st.id} onClick={() => setOpTab(st.id)}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    opTab === st.id
+                      ? 'bg-white dark:bg-navy-700 text-navy-900 dark:text-white shadow-sm'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-navy-700 dark:hover:text-slate-200'
+                  }`}>
+                  {st.label}
+                </button>
+              ))}
+            </div>
+
+            {/* ── Sub-tab: Hoje ── */}
+            {opTab === 'hoje' && <>
             {/* Aulas acontecendo agora — classifica cada uma por status */}
             {aulasAgora.length > 0 && (() => {
               // Classifica cada turma: 'em_aula' | 'tolerancia' | 'pre'
@@ -1780,6 +1793,17 @@ export default function PoloDetalhe() {
                 </div>
               )}
             </div>
+            </> /* fim sub-tab Hoje */}
+
+            {/* ── Sub-tab: Turmas ── */}
+            {opTab === 'turmas' && <>
+            {canEditPolo && (
+              <div className="flex justify-end">
+                <Button size="sm" onClick={() => { setEditTurmaId(null); setTurmaForm(EMPTY_TURMA_FORM); setTurmaModalOpen(true) }}>
+                  <Plus size={13}/> Nova Turma
+                </Button>
+              </div>
+            )}
 
             {/* Todas as turmas — agrupadas por modalidade, colapsável */}
             {turmasPolo.length > 0 && (() => {
@@ -1863,6 +1887,10 @@ export default function PoloDetalhe() {
               )
             })()}
 
+            </> /* fim sub-tab Turmas */}
+
+            {/* ── Sub-tab: Histórico ── */}
+            {opTab === 'historico' && <>
             {/* Histórico de Aulas com filtros */}
             {(() => {
               const todosRegs = registros
@@ -1942,6 +1970,7 @@ export default function PoloDetalhe() {
                 </div>
               )
             })()}
+            </> /* fim sub-tab Histórico */}
           </div>
         )}
 
@@ -2026,9 +2055,10 @@ export default function PoloDetalhe() {
 
               {/* Elegibilidade Detalhada */}
               {(() => {
+                const turmasMelhorIdadeIds = new Set(turmasMelhorIdade.map(t => t.id))
                 const alunosMelhorIdadeRaw = alunosPolo.filter(a => {
-                  if (!a.data_nasc) return false
-                  return new Date().getFullYear() - new Date(a.data_nasc).getFullYear() >= 60
+                  const ids = [a.turma_id, ...(a.aluno_turmas ?? []).map(at => at.turma_id)]
+                  return ids.some(tid => turmasMelhorIdadeIds.has(tid))
                 })
                 // Enriquecer com freq e ordenar por freq desc (ranking)
                 const alunosMelhorIdade = alunosMelhorIdadeRaw.map(a => {
@@ -2130,6 +2160,25 @@ export default function PoloDetalhe() {
         {/* ─── ABA ALUNOS ──────────────────────────────────────────── */}
         {tab === 'alunos' && (
           <div className="space-y-4">
+            {/* Sub-tabs */}
+            <div className="flex gap-1 bg-slate-100 dark:bg-navy-800 p-1 rounded-xl w-fit">
+              {[
+                { id: 'lista', label: 'Lista' },
+                { id: 'engajamento', label: 'Engajamento' },
+              ].map(st => (
+                <button key={st.id} onClick={() => setAlunosTab(st.id)}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    alunosTab === st.id
+                      ? 'bg-white dark:bg-navy-700 text-navy-900 dark:text-white shadow-sm'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-navy-700 dark:hover:text-slate-200'
+                  }`}>
+                  {st.label}
+                </button>
+              ))}
+            </div>
+
+            {/* ── Sub-tab: Lista ── */}
+            {alunosTab === 'lista' && <>
             {/* Barra de busca + filtros */}
             <div className="flex flex-col sm:flex-row gap-2">
               <div className="relative flex-1">
@@ -2255,6 +2304,89 @@ export default function PoloDetalhe() {
                     )
                   })}
                 </div>
+              </div>
+            )}
+            </> /* fim sub-tab Lista */}
+
+            {/* ── Sub-tab: Engajamento ── */}
+            {alunosTab === 'engajamento' && (
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium uppercase tracking-widest">
+                    {engajamento.length} aluno{engajamento.length !== 1 ? 's' : ''} ativos · frequência dos últimos 3 meses
+                  </p>
+                </div>
+                {engajamento.length === 0 ? (
+                  <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 py-12 flex flex-col items-center gap-3">
+                    <div className="text-3xl">📊</div>
+                    <p className="text-sm text-slate-400 dark:text-slate-500 text-center">Nenhum aluno ativo com histórico de presença.</p>
+                  </div>
+                ) : (
+                  <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 overflow-hidden">
+                    <div className="grid grid-cols-12 gap-2 px-4 py-2 bg-slate-50 dark:bg-navy-900 border-b border-slate-100 dark:border-navy-700">
+                      <p className="col-span-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">#</p>
+                      <p className="col-span-4 text-[10px] font-bold uppercase tracking-widest text-slate-400">Aluno</p>
+                      <p className="col-span-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Frequência</p>
+                      <p className="col-span-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 text-center">Aulas</p>
+                      <p className="col-span-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 text-center">Afastado</p>
+                    </div>
+                    <div className="divide-y divide-slate-100 dark:divide-navy-700">
+                      {engajamento.map((a, idx) => {
+                        const freqCor = a.freq === null ? 'text-slate-400' : a.freq >= 70 ? 'text-green-600 dark:text-green-400' : a.freq >= 50 ? 'text-amber-500' : 'text-red-500'
+                        const barCor = a.freq === null ? '#e2e8f0' : a.freq >= 70 ? '#009640' : a.freq >= 50 ? '#f59e0b' : '#ef4444'
+                        const alerta = a.diasAfastado !== null && a.diasAfastado >= 14
+                        return (
+                          <div key={a.id} className={`grid grid-cols-12 gap-2 px-4 py-3 items-center ${alerta ? 'bg-red-50 dark:bg-red-950/30' : 'hover:bg-slate-50 dark:hover:bg-navy-700/40'} transition-colors`}>
+                            <div className="col-span-1">
+                              <span className={`text-[10px] font-bold ${idx < 3 ? 'text-amber-500' : 'text-slate-400'}`}>
+                                {idx < 3 ? ['🥇','🥈','🥉'][idx] : `${idx + 1}`}
+                              </span>
+                            </div>
+                            <div className="col-span-4 flex items-center gap-2 min-w-0">
+                              {a.foto_url ? (
+                                <img src={a.foto_url} alt={a.nome} className="w-7 h-7 rounded-full object-cover flex-shrink-0 border border-slate-200 dark:border-navy-600" />
+                              ) : (
+                                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-primary-600 to-primary-400 flex items-center justify-center flex-shrink-0">
+                                  <span className="text-white text-[9px] font-bold">{a.nome?.charAt(0)?.toUpperCase()}</span>
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <p className="text-xs font-semibold text-navy-900 dark:text-white truncate">{a.nome}</p>
+                                <p className="text-[9px] text-slate-400 dark:text-slate-500 truncate">
+                                  {turmasPolo.find(t => t.id === a.turma_id)?.modalidades?.nome ?? 'Sem turma'}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="col-span-3 flex items-center gap-2">
+                              <div className="flex-1 h-1.5 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden">
+                                <div className="h-full rounded-full transition-all" style={{ width: `${a.freq ?? 0}%`, backgroundColor: barCor }} />
+                              </div>
+                              <span className={`text-[10px] font-bold w-7 text-right shrink-0 ${freqCor}`}>
+                                {a.freq !== null ? `${a.freq}%` : '—'}
+                              </span>
+                            </div>
+                            <div className="col-span-2 text-center">
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                                {a.presentes}/{a.total}
+                              </span>
+                            </div>
+                            <div className="col-span-2 text-center">
+                              {a.diasAfastado === null ? (
+                                <span className="text-[10px] text-slate-400">—</span>
+                              ) : a.diasAfastado === 0 ? (
+                                <span className="text-[10px] text-green-600 dark:text-green-400 font-semibold">Hoje</span>
+                              ) : alerta ? (
+                                <span className="text-[10px] text-red-500 font-semibold">{a.diasAfastado}d ⚠</span>
+                              ) : (
+                                <span className="text-[10px] text-slate-500 dark:text-slate-400">{a.diasAfastado}d</span>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
