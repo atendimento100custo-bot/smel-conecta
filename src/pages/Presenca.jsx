@@ -163,8 +163,16 @@ export default function Presenca() {
     let cancelled = false
     async function load() {
       setAlunosLoading(true)
+      // Um aluno pode estar matriculado nesta turma como "turma principal" (alunos.turma_id)
+      // ou como matrícula extra (aluno_turmas) — ex: aluno que faz Corrida E Funcional.
+      // Sem isso, quem só está vinculado via aluno_turmas sumia da chamada dessa turma.
+      const { data: vinculos } = await supabase.from('aluno_turmas').select('aluno_id').eq('turma_id', turmaId)
+      const extraIds = (vinculos ?? []).map(v => v.aluno_id)
+      const alunosQuery = extraIds.length > 0
+        ? supabase.from('alunos').select('id,nome,status').or(`turma_id.eq.${turmaId},id.in.(${extraIds.join(',')})`).order('nome')
+        : supabase.from('alunos').select('id,nome,status').eq('turma_id', turmaId).order('nome')
       const [{ data: alunosData }, { data: presencasData }] = await Promise.all([
-        supabase.from('alunos').select('id,nome,status').eq('turma_id', turmaId).order('nome'),
+        alunosQuery,
         supabase.from('presencas').select('id,aluno_id,status,motivo').eq('turma_id', turmaId).eq('data', dataSel),
       ])
       if (cancelled) return
