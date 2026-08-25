@@ -7,7 +7,8 @@ import { useSupabaseData } from '../hooks/useSupabaseData'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../contexts/ThemeContext'
 import { useOfflineQueue } from '../hooks/useOfflineQueue'
-import { supabase, supabaseAdmin } from '../lib/supabase'
+import { supabase } from '../lib/supabase'
+import { criarFuncionario, atualizarPerfilFuncionario } from '../lib/adminUsers'
 import Topbar from '../components/Topbar'
 import Badge from '../components/ui/Badge'
 import Button from '../components/ui/Button'
@@ -699,17 +700,14 @@ export default function PoloDetalhe() {
   async function handleSaveFunc() {
     if (!editFuncMembro) return
     setEditFuncSaving(true)
-    // Usa supabaseAdmin para garantir que cargo seja salvo mesmo com RLS
-    const client = supabaseAdmin ?? supabase
-    await client.from('profiles').update({
+    // Edge Function verifica permissão no servidor e usa a service role lá dentro
+    // (nunca no navegador) — cobre tanto o profile quanto o e-mail de auth.
+    await atualizarPerfilFuncionario(editFuncMembro.id, {
       nome: editFuncForm.nome,
       cargo: editFuncForm.cargo,
       telefone: editFuncForm.telefone || null,
       email: editFuncForm.email || null,
-    }).eq('id', editFuncMembro.id)
-    if (editFuncForm.email && supabaseAdmin) {
-      await supabaseAdmin.auth.admin.updateUserById(editFuncMembro.id, { email: editFuncForm.email })
-    }
+    })
     await supabase.from('turmas').update({ professor_id: null }).eq('professor_id', editFuncMembro.id)
     await supabase.from('atribuicoes').delete().eq('usuario_id', editFuncMembro.id)
     await salvarVinculos(editFuncMembro.id, editFuncForm.cargo, editFuncForm.vinculos ?? [])
@@ -807,39 +805,21 @@ export default function PoloDetalhe() {
     setCriandoFunc(true)
     setFuncError('')
 
-    if (!supabaseAdmin) {
-      setFuncError('Configuração admin não disponível.')
-      setCriandoFunc(false)
-      return
-    }
-
-    const { data, error } = await supabaseAdmin.auth.admin.createUser({
+    const { data, error } = await criarFuncionario({
+      nome: novoFuncForm.nome,
       email: novoFuncForm.email,
-      password: novoFuncForm.senha,
-      email_confirm: true,
-      user_metadata: { nome: novoFuncForm.nome },
+      senha: novoFuncForm.senha,
+      cargo: novoFuncForm.cargo,
+      telefone: novoFuncForm.telefone,
     })
 
-    if (error || !data?.user) {
-      setFuncError(
-        error?.message?.includes('already been registered')
-          ? 'Este e-mail já está cadastrado.'
-          : (error?.message ?? 'Erro ao criar usuário')
-      )
+    if (error || !data?.userId) {
+      setFuncError(error ?? 'Erro ao criar usuário')
       setCriandoFunc(false)
       return
     }
 
-    const userId = data.user.id
-    await supabaseAdmin.from('profiles').upsert({
-      id: userId,
-      nome: novoFuncForm.nome,
-      cargo: novoFuncForm.cargo,
-      telefone: novoFuncForm.telefone || null,
-      email: novoFuncForm.email || null,
-      ativo: true,
-    }, { onConflict: 'id' })
-
+    const userId = data.userId
     await salvarVinculos(userId, novoFuncForm.cargo, novoFuncForm.vinculos ?? [])
 
     setCriandoFunc(false)

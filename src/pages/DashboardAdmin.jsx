@@ -400,7 +400,7 @@ export default function DashboardAdmin() {
           <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col h-full">
             <div className="flex items-center justify-between mb-3 shrink-0">
               <p className="text-xs font-bold text-navy-900 dark:text-white">
-                📋 Freq. por Turma — <span className="capitalize">{nomeMes}</span>
+                Freq. por Turma — <span className="capitalize">{nomeMes}</span>
               </p>
               {turmaFreq.length > 0 && (
                 <span className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0 ml-2">{turmaFreq.length} turma{turmaFreq.length !== 1 ? 's' : ''}</span>
@@ -457,7 +457,7 @@ export default function DashboardAdmin() {
 
           {/* Top 10 Alunos — altura definida pelo useLayoutEffect para igualar Top Polos */}
           <div ref={alunosCardRef} className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col overflow-hidden">
-            <p className="text-xs font-bold text-navy-900 dark:text-white mb-3 shrink-0">🏆 Top Alunos — Maior Frequência</p>
+            <p className="text-xs font-bold text-navy-900 dark:text-white mb-3 shrink-0">Top Alunos — Maior Frequência</p>
             {topAlunos.length === 0 ? (
               <div className="flex-1 flex items-center justify-center">
                 <p className="text-xs text-slate-400 dark:text-slate-500 text-center">Registre pelo menos 3 aulas por aluno para aparecer aqui.</p>
@@ -487,7 +487,7 @@ export default function DashboardAdmin() {
 
           {/* Top 5 Polos — referência de altura, tamanho natural pelo conteúdo */}
           <div ref={polosCardRef} className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex flex-col">
-            <p className="text-xs font-bold text-navy-900 dark:text-white mb-3 shrink-0">🏟️ Top Polos — Engajamento e Ocupação</p>
+            <p className="text-xs font-bold text-navy-900 dark:text-white mb-3 shrink-0">Top Polos — Engajamento e Ocupação</p>
             {topPolos.length === 0 ? (
               <div className="py-8 flex items-center justify-center">
                 <p className="text-xs text-slate-400 dark:text-slate-500 text-center">Nenhum polo com alunos ativos ainda.</p>

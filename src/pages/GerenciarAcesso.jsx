@@ -1,7 +1,8 @@
 // src/pages/GerenciarAcesso.jsx
 import { useState, useCallback } from 'react'
 import { useSupabaseData } from '../hooks/useSupabaseData'
-import { supabase, supabaseAdmin } from '../lib/supabase'
+import { supabase } from '../lib/supabase'
+import { atualizarEmailFuncionario, resetarSenhaFuncionario, excluirFuncionario } from '../lib/adminUsers'
 import Topbar from '../components/Topbar'
 import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
@@ -35,7 +36,6 @@ export default function GerenciarAcesso() {
   const [deleting, setDeleting] = useState(false)
 
   // Modal credenciais (email + senha)
-  const DEFAULT_SENHA = 'smel2026'
   const [resetTarget, setResetTarget] = useState(null)
   const [novoEmail, setNovoEmail] = useState('')
   const [savingEmail, setSavingEmail] = useState(false)
@@ -43,6 +43,7 @@ export default function GerenciarAcesso() {
   const [emailError, setEmailError] = useState('')
   const [resetting, setResetting] = useState(false)
   const [resetDone, setResetDone] = useState(false)
+  const [senhaGerada, setSenhaGerada] = useState('')
   const [copied, setCopied] = useState(false)
 
   function openCredenciais(p) {
@@ -53,22 +54,21 @@ export default function GerenciarAcesso() {
     setEmailError('')
     setResetting(false)
     setResetDone(false)
+    setSenhaGerada('')
     setCopied(false)
   }
 
   async function handleSalvarEmail() {
-    if (!resetTarget || !supabaseAdmin) return
+    if (!resetTarget) return
     const email = novoEmail.trim()
     if (!email || email === resetTarget.email) return
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setEmailError('Email inválido'); return }
     setSavingEmail(true)
     setEmailError('')
-    const { error } = await supabaseAdmin.auth.admin.updateUserById(resetTarget.id, { email })
+    const { error } = await atualizarEmailFuncionario(resetTarget.id, email)
     if (error) {
-      setEmailError(error.message || 'Erro ao atualizar email')
+      setEmailError(error || 'Erro ao atualizar email')
     } else {
-      // Atualiza também o profile
-      await supabase.from('profiles').update({ email }).eq('id', resetTarget.id)
       setEmailDone(true)
       setResetTarget(prev => ({ ...prev, email }))
       reload()
@@ -77,15 +77,17 @@ export default function GerenciarAcesso() {
   }
 
   async function handleResetSenha() {
-    if (!resetTarget || !supabaseAdmin) return
+    if (!resetTarget) return
     setResetting(true)
-    await supabaseAdmin.auth.admin.updateUserById(resetTarget.id, { password: DEFAULT_SENHA })
+    const { data, error } = await resetarSenhaFuncionario(resetTarget.id)
     setResetting(false)
+    if (error) { setEmailError(error); return }
+    setSenhaGerada(data?.senhaGerada ?? '')
     setResetDone(true)
   }
 
   function handleCopySenha() {
-    navigator.clipboard.writeText(DEFAULT_SENHA)
+    navigator.clipboard.writeText(senhaGerada)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -95,19 +97,18 @@ export default function GerenciarAcesso() {
     setEmailDone(false)
     setEmailError('')
     setResetDone(false)
+    setSenhaGerada('')
     setCopied(false)
   }
 
   async function handleDelete() {
-    if (!deleteTarget || !supabaseAdmin) return
+    if (!deleteTarget) return
     setDeleting(true)
-    // Limpar atribuições e vínculos antes
-    await supabase.from('atribuicoes').delete().eq('usuario_id', deleteTarget.id)
-    await supabase.from('turmas').update({ professor_id: null }).eq('professor_id', deleteTarget.id)
-    // Deletar auth user (cascata deleta o profile)
-    await supabaseAdmin.auth.admin.deleteUser(deleteTarget.id)
-    setDeleteTarget(null)
+    // A Edge Function já limpa atribuições/turmas antes de excluir a conta.
+    const { error } = await excluirFuncionario(deleteTarget.id)
     setDeleting(false)
+    if (error) { console.warn('[excluirFuncionario]', error); return }
+    setDeleteTarget(null)
     reload()
   }
 
@@ -460,12 +461,11 @@ export default function GerenciarAcesso() {
             </p>
             {!resetDone ? (
               <>
-                <div className="flex items-center justify-between bg-slate-100 dark:bg-navy-900 rounded-lg px-3 py-2 border border-slate-200 dark:border-navy-700">
-                  <code className="text-sm font-mono font-bold text-navy-900 dark:text-white tracking-wider">{DEFAULT_SENHA}</code>
-                  <span className="text-[10px] text-slate-400">senha padrão</span>
-                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-navy-900 rounded-lg px-3 py-2 border border-slate-200 dark:border-navy-700">
+                  Uma senha nova e aleatória será gerada — anote e envie ao usuário, ela só aparece uma vez.
+                </p>
                 <Button size="sm" onClick={handleResetSenha} disabled={resetting} className="w-full">
-                  {resetting ? 'Redefinindo...' : 'Redefinir para senha padrão'}
+                  {resetting ? 'Redefinindo...' : 'Gerar nova senha'}
                 </Button>
               </>
             ) : (
@@ -475,7 +475,7 @@ export default function GerenciarAcesso() {
                 </div>
                 <div className="bg-slate-50 dark:bg-navy-900 rounded-lg p-3 border border-slate-200 dark:border-navy-700 text-xs space-y-1">
                   <p className="text-slate-500">📧 <span className="font-medium text-navy-900 dark:text-white">{resetTarget?.email}</span></p>
-                  <p className="text-slate-500">🔑 <span className="font-medium text-navy-900 dark:text-white">{DEFAULT_SENHA}</span></p>
+                  <p className="text-slate-500">🔑 <span className="font-medium text-navy-900 dark:text-white">{senhaGerada}</span></p>
                 </div>
                 <Button variant="secondary" size="sm" onClick={handleCopySenha} className="w-full flex items-center justify-center gap-1.5">
                   {copied ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}

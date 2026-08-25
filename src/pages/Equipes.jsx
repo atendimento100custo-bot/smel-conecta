@@ -1,7 +1,8 @@
 // src/pages/Equipes.jsx
 import { useState, useMemo } from 'react'
 import { useSupabaseData } from '../hooks/useSupabaseData'
-import { supabase, supabaseAdmin } from '../lib/supabase'
+import { supabase } from '../lib/supabase'
+import { criarFuncionario, atualizarEmailFuncionario, excluirFuncionario } from '../lib/adminUsers'
 import { useAuth } from '../hooks/useAuth'
 import { logAcao } from '../lib/auditLog'
 import Topbar from '../components/Topbar'
@@ -158,8 +159,9 @@ export default function Equipes() {
       email: form.email || null,
     }).eq('id', editing.id)
 
-    if (form.email && supabaseAdmin) {
-      await supabaseAdmin.auth.admin.updateUserById(editing.id, { email: form.email })
+    if (form.email) {
+      const { error } = await atualizarEmailFuncionario(editing.id, form.email)
+      if (error) console.warn('[atualizarEmailFuncionario]', error)
     }
 
     await supabase.from('turmas').update({ professor_id: null }).eq('professor_id', editing.id)
@@ -201,41 +203,21 @@ export default function Equipes() {
     setCreating(true)
     setCreateError('')
 
-    if (!supabaseAdmin) {
-      setCreateError('Configuração admin não disponível.')
-      setCreating(false)
-      return
-    }
-
-    const { data, error } = await supabaseAdmin.auth.admin.createUser({
+    const { data, error } = await criarFuncionario({
+      nome: createForm.nome,
       email: createForm.email,
-      password: createForm.senha,
-      email_confirm: true,
-      user_metadata: { nome: createForm.nome }, // evita trigger usar email como nome
+      senha: createForm.senha,
+      cargo: createForm.cargo,
+      telefone: createForm.telefone,
     })
 
-    if (error || !data?.user) {
-      setCreateError(
-        error?.message?.includes('already been registered')
-          ? 'Este e-mail já está cadastrado.'
-          : (error?.message ?? 'Erro ao criar usuário')
-      )
+    if (error || !data?.userId) {
+      setCreateError(error ?? 'Erro ao criar usuário')
       setCreating(false)
       return
     }
 
-    const userId = data.user.id
-
-    // Usa supabaseAdmin para garantir que cargo/nome sejam salvos corretamente
-    // independente do cargo do usuário logado (RLS bloquearia coordinator/professor)
-    await supabaseAdmin.from('profiles').upsert({
-      id: userId,
-      nome: createForm.nome,
-      cargo: createForm.cargo,
-      telefone: createForm.telefone || null,
-      email: createForm.email || null,
-      ativo: true,
-    }, { onConflict: 'id' })
+    const userId = data.userId
 
     await salvarVinculos(userId, createForm.cargo, createForm.vinculos ?? [])
 
@@ -255,12 +237,10 @@ export default function Equipes() {
   }
 
   async function handleDelete() {
-    if (!deletando || !supabaseAdmin) return
-    // Limpar atribuições e referências antes de deletar
-    await supabase.from('atribuicoes').delete().eq('usuario_id', deletando.id)
-    await supabase.from('turmas').update({ professor_id: null }).eq('professor_id', deletando.id)
-    // Deletar auth user (cascata deleta o profile)
-    await supabaseAdmin.auth.admin.deleteUser(deletando.id)
+    if (!deletando) return
+    // A Edge Function já limpa atribuições/turmas antes de excluir a conta.
+    const { error } = await excluirFuncionario(deletando.id)
+    if (error) { console.warn('[excluirFuncionario]', error); setDeletando(null); return }
     setDeletando(null)
     if (selectedMembro?.id === deletando.id) setSelectedMembro(null)
     reload()
