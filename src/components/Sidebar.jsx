@@ -3,8 +3,9 @@ import { NavLink } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../contexts/ThemeContext'
 import { useSidebar } from '../contexts/SidebarContext'
+import { usePermissoesTela } from '../contexts/PermissoesContext'
 import {
-  LayoutDashboard, MapPin, Trophy, Users,
+  LayoutDashboard, MapPin, Trophy, Users, Radar, Lock,
   UserCheck, BarChart2, Key, Settings, LogOut, Sun, Moon, X, History, Activity, ClipboardList
 } from 'lucide-react'
 
@@ -12,24 +13,28 @@ const NAV = [
   {
     label: 'Visão Geral',
     items: [
-      { to: '/', icon: LayoutDashboard, label: 'Dashboard', minRole: 'estagiario' },
+      { to: '/', icon: LayoutDashboard, label: 'Dashboard', minRole: 'estagiario', tela: 'dashboard' },
     ]
   },
   {
     label: 'Gestão',
     items: [
-      { to: '/polos', icon: MapPin, label: 'Polos', minRole: 'estagiario' },
-      { to: '/presenca', icon: ClipboardList, label: 'Presença', minRole: 'estagiario' },
-      { to: '/modalidades', icon: Trophy, label: 'Modalidades', minRole: 'coordenador' },
-      { to: '/alunos', icon: Users, label: 'Alunos', minRole: 'professor' },
-      { to: '/equipes', icon: UserCheck, label: 'Equipe', minRole: 'coordenador' },
+      { to: '/polos', icon: MapPin, label: 'Polos', minRole: 'estagiario', tela: 'polos' },
+      { to: '/presenca', icon: ClipboardList, label: 'Presença', minRole: 'estagiario', tela: 'presenca' },
+      { to: '/modalidades', icon: Trophy, label: 'Modalidades', minRole: 'coordenador', tela: 'modalidades' },
+      { to: '/alunos', icon: Users, label: 'Alunos', minRole: 'professor', tela: 'alunos' },
+      { to: '/equipes', icon: UserCheck, label: 'Equipe', minRole: 'coordenador', tela: 'equipes' },
     ]
   },
   {
     label: 'Admin',
     items: [
-      { to: '/relatorios', icon: BarChart2, label: 'Relatórios', minRole: 'professor' },
+      { to: '/relatorios', icon: BarChart2, label: 'Relatórios', minRole: 'professor', tela: 'relatorios' },
+      // Telas exclusivas de admin — nunca controladas pela matriz de permissões,
+      // pra o admin nunca correr risco de se trancar fora do próprio sistema.
+      { to: '/supervisao', icon: Radar, label: 'Supervisão', minRole: 'admin' },
       { to: '/gerenciar-acesso', icon: Key, label: 'Acessos', minRole: 'admin' },
+      { to: '/permissoes-acesso', icon: Lock, label: 'Permissões', minRole: 'admin' },
       { to: '/historico', icon: History, label: 'Histórico', minRole: 'admin' },
       { to: '/infra', icon: Activity, label: 'Infraestrutura', minRole: 'admin' },
       { to: '/configuracoes', icon: Settings, label: 'Configurações', minRole: 'estagiario' },
@@ -39,6 +44,7 @@ const NAV = [
 
 export default function Sidebar() {
   const { profile, hasMinRole, signOut } = useAuth()
+  const { podeAcessar } = usePermissoesTela()
   const { dark, toggle } = useTheme()
   const { open, close } = useSidebar()
 
@@ -77,7 +83,9 @@ export default function Sidebar() {
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
         {NAV.map(section => {
-          const visibleItems = section.items.filter(i => hasMinRole(i.minRole))
+          const visibleItems = section.items.filter(i =>
+            hasMinRole(i.minRole) && (!i.tela || podeAcessar(i.tela, profile?.cargo))
+          )
           if (!visibleItems.length) return null
           return (
             <div key={section.label} className="mb-1">

@@ -21,9 +21,11 @@ import GerenciarAcesso from './pages/GerenciarAcesso'
 import Configuracoes from './pages/Configuracoes'
 import Historico from './pages/Historico'
 import Infra from './pages/Infra'
+import Supervisao from './pages/Supervisao'
+import PermissoesAcesso from './pages/PermissoesAcesso'
 
-function R({ minRole, children }) {
-  return <ProtectedRoute minRole={minRole}>{children}</ProtectedRoute>
+function R({ minRole, tela, children }) {
+  return <ProtectedRoute minRole={minRole} tela={tela}>{children}</ProtectedRoute>
 }
 
 export default function App() {
@@ -31,23 +33,25 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route element={<R minRole="estagiario"><Layout /></R>}>
-        <Route index element={<Dashboard />} />
-        <Route path="polos" element={<Polos />} />
-        <Route path="polos/:id" element={<PoloDetalhe />} />
-        <Route path="modalidades" element={<R minRole="coordenador"><Modalidades /></R>} />
-        <Route path="equipes" element={<R minRole="coordenador"><Equipes /></R>} />
+        <Route index element={<R minRole="estagiario" tela="dashboard"><Dashboard /></R>} />
+        <Route path="polos" element={<R minRole="estagiario" tela="polos"><Polos /></R>} />
+        <Route path="polos/:id" element={<R minRole="estagiario" tela="polos"><PoloDetalhe /></R>} />
+        <Route path="modalidades" element={<R minRole="coordenador" tela="modalidades"><Modalidades /></R>} />
+        <Route path="equipes" element={<R minRole="coordenador" tela="equipes"><Equipes /></R>} />
         <Route path="turmas" element={<R minRole="professor"><Turmas /></R>} />
-        <Route path="alunos" element={<R minRole="professor"><Alunos /></R>} />
-        <Route path="alunos/:id" element={<R minRole="professor"><AlunoDetalhe /></R>} />
-        <Route path="presenca" element={<Presenca />} />
+        <Route path="alunos" element={<R minRole="professor" tela="alunos"><Alunos /></R>} />
+        <Route path="alunos/:id" element={<R minRole="professor" tela="alunos"><AlunoDetalhe /></R>} />
+        <Route path="presenca" element={<R minRole="estagiario" tela="presenca"><Presenca /></R>} />
         <Route path="registro-aula" element={<R minRole="professor"><RegistroAula /></R>} />
         <Route path="atestados" element={<R minRole="professor"><Atestados /></R>} />
         <Route path="melhor-idade" element={<R minRole="professor"><MelhorIdade /></R>} />
         <Route path="viagens" element={<R minRole="coordenador"><Viagens /></R>} />
-        <Route path="relatorios" element={<R minRole="professor"><Relatorios /></R>} />
+        <Route path="relatorios" element={<R minRole="professor" tela="relatorios"><Relatorios /></R>} />
         <Route path="gerenciar-acesso" element={<R minRole="admin"><GerenciarAcesso /></R>} />
         <Route path="historico" element={<R minRole="admin"><Historico /></R>} />
         <Route path="infra" element={<R minRole="admin"><Infra /></R>} />
+        <Route path="supervisao" element={<R minRole="admin"><Supervisao /></R>} />
+        <Route path="permissoes-acesso" element={<R minRole="admin"><PermissoesAcesso /></R>} />
         <Route path="configuracoes" element={<Configuracoes />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

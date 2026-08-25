@@ -7,6 +7,7 @@ import { logAcao } from '../lib/auditLog'
 import { useSidebar } from '../contexts/SidebarContext'
 import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
+import Modal from '../components/ui/Modal'
 import {
   Check, X, Save, Users, Clock, StopCircle, ChevronDown, ChevronUp,
   AlertCircle, ShieldCheck, PlayCircle, List, Map as MapIcon, Menu
@@ -104,6 +105,11 @@ export default function Presenca() {
   const [saving,    setSaving]    = useState(false)
   const [saveMsg,   setSaveMsg]   = useState(null)
 
+  // ── justificativa de ausência antecipada ────────────────────────────────────
+  const [justModalAluno, setJustModalAluno] = useState(null) // aluno sendo justificado
+  const [justForm,       setJustForm]       = useState({ data_inicio: '', data_fim: '', motivo: '' })
+  const [savingJust,     setSavingJust]     = useState(false)
+
   // ── painel ──────────────────────────────────────────────────────────────────
   const [painelData,    setPainelData]    = useState([])
   const [painelLoading, setPainelLoading] = useState(false)
@@ -141,6 +147,16 @@ export default function Presenca() {
     alunos.map(a => (a.nome ?? '').trim().toLowerCase())
           .filter((n, _, arr) => arr.filter(x => x === n).length > 1)
   )
+  // Nome amigável de cada turma — usado pra avisar "também matriculado em X"
+  const turmaNomeById = {}
+  for (const t of allTurmas ?? []) {
+    turmaNomeById[t.id] = `${t.modalidades?.nome ?? 'Turma'}${t.polos?.bairro ? ' · ' + t.polos.bairro : ''}`
+  }
+  function outrasTurmasDoAluno(aluno) {
+    const ids = new Set([aluno.turma_id, ...(aluno.aluno_turmas ?? []).map(v => v.turma_id)].filter(Boolean))
+    ids.delete(turmaId)
+    return [...ids].map(tid => turmaNomeById[tid]).filter(Boolean)
+  }
   const alunosAtivos      = alunos.filter(a => a.status === 'Ativo')
   const totalPresentes    = alunosAtivos.filter(a => presencaState[a.id] === 'presente').length
   const totalFaltas       = alunosAtivos.filter(a => presencaState[a.id] === 'falta').length
@@ -158,41 +174,70 @@ export default function Presenca() {
     return () => { cancelled = true }
   }, [turmaId, dataSel])
 
-  useEffect(() => {
+  const carregarAlunosEChamada = useCallback(async ({ cancelledRef } = {}) => {
     if (!turmaId || !dataSel) { setAlunos([]); setPresencaState({}); return }
-    let cancelled = false
-    async function load() {
-      setAlunosLoading(true)
-      // Um aluno pode estar matriculado nesta turma como "turma principal" (alunos.turma_id)
-      // ou como matrícula extra (aluno_turmas) — ex: aluno que faz Corrida E Funcional.
-      // Sem isso, quem só está vinculado via aluno_turmas sumia da chamada dessa turma.
-      const { data: vinculos } = await supabase.from('aluno_turmas').select('aluno_id').eq('turma_id', turmaId)
-      const extraIds = (vinculos ?? []).map(v => v.aluno_id)
-      const alunosQuery = extraIds.length > 0
-        ? supabase.from('alunos').select('id,nome,status').or(`turma_id.eq.${turmaId},id.in.(${extraIds.join(',')})`).order('nome')
-        : supabase.from('alunos').select('id,nome,status').eq('turma_id', turmaId).order('nome')
-      const [{ data: alunosData }, { data: presencasData }] = await Promise.all([
-        alunosQuery,
-        supabase.from('presencas').select('id,aluno_id,status,motivo').eq('turma_id', turmaId).eq('data', dataSel),
-      ])
-      if (cancelled) return
-      const rows = (alunosData ?? []).sort((a, b) => {
-        const aA = a.status === 'Ativo' ? 0 : 1; const bA = b.status === 'Ativo' ? 0 : 1
-        return aA - bA || (a.nome ?? '').localeCompare(b.nome ?? '', 'pt-BR')
-      })
-      const pMap = {}, idMap = {}, motivoMap = {}
-      for (const p of presencasData ?? []) {
-        pMap[p.aluno_id] = p.status; idMap[p.aluno_id] = p.id
-        if (p.motivo) motivoMap[p.aluno_id] = p.motivo
-      }
-      const initState = {}
-      for (const a of rows) { if (a.id in pMap) initState[a.id] = pMap[a.id] }
-      setAlunos(rows); setPresencaState(initState); setExistingIds(idMap)
-      setMotivoState(motivoMap); setMotivoAberto(null); setAlunosLoading(false)
+    setAlunosLoading(true)
+    // Um aluno pode estar matriculado nesta turma como "turma principal" (alunos.turma_id)
+    // ou como matrícula extra (aluno_turmas) — ex: aluno que faz Corrida E Funcional.
+    // Sem isso, quem só está vinculado via aluno_turmas sumia da chamada dessa turma.
+    const { data: vinculos } = await supabase.from('aluno_turmas').select('aluno_id').eq('turma_id', turmaId)
+    const extraIds = (vinculos ?? []).map(v => v.aluno_id)
+    const alunosQuery = extraIds.length > 0
+      ? supabase.from('alunos').select('id,nome,status,turma_id,aluno_turmas(turma_id)').or(`turma_id.eq.${turmaId},id.in.(${extraIds.join(',')})`).order('nome')
+      : supabase.from('alunos').select('id,nome,status,turma_id,aluno_turmas(turma_id)').eq('turma_id', turmaId).order('nome')
+    const [{ data: alunosData }, { data: presencasData }] = await Promise.all([
+      alunosQuery,
+      supabase.from('presencas').select('id,aluno_id,status,motivo').eq('turma_id', turmaId).eq('data', dataSel),
+    ])
+    if (cancelledRef?.current) return
+    const rows = (alunosData ?? []).sort((a, b) => {
+      const aA = a.status === 'Ativo' ? 0 : 1; const bA = b.status === 'Ativo' ? 0 : 1
+      return aA - bA || (a.nome ?? '').localeCompare(b.nome ?? '', 'pt-BR')
+    })
+    const alunoIds = rows.map(a => a.id)
+    const pMap = {}, idMap = {}, motivoMap = {}
+    for (const p of presencasData ?? []) {
+      pMap[p.aluno_id] = p.status; idMap[p.aluno_id] = p.id
+      if (p.motivo) motivoMap[p.aluno_id] = p.motivo
     }
-    load()
-    return () => { cancelled = true }
+
+    // Duas fontes de "isso não deveria virar falta":
+    // 1) justificativa cadastrada com antecedência (aluno/responsável avisou, com motivo e período)
+    // 2) presença já registrada em OUTRA turma do aluno no mesmo dia (matrícula dupla —
+    //    ele foi na outra modalidade hoje, não deveria levar falta nesta)
+    let justifMap = {}, outraTurmaSet = new Set()
+    if (alunoIds.length > 0) {
+      const [{ data: justifs }, { data: outrasPresencas }] = await Promise.all([
+        supabase.from('justificativas_ausencia').select('aluno_id,motivo')
+          .in('aluno_id', alunoIds).lte('data_inicio', dataSel).gte('data_fim', dataSel),
+        supabase.from('presencas').select('aluno_id')
+          .in('aluno_id', alunoIds).eq('data', dataSel).neq('turma_id', turmaId).in('status', ['presente', 'justificado']),
+      ])
+      for (const j of justifs ?? []) justifMap[j.aluno_id] = j.motivo
+      for (const p of outrasPresencas ?? []) outraTurmaSet.add(p.aluno_id)
+    }
+    if (cancelledRef?.current) return
+
+    const initState = {}, initMotivo = { ...motivoMap }
+    for (const a of rows) {
+      if (a.id in pMap) { initState[a.id] = pMap[a.id]; continue } // já tem registro salvo — respeita
+      if (justifMap[a.id]) {
+        initState[a.id] = 'justificado'
+        initMotivo[a.id] = `📅 Ausência avisada: ${justifMap[a.id]}`
+      } else if (outraTurmaSet.has(a.id)) {
+        initState[a.id] = 'justificado'
+        initMotivo[a.id] = '🔀 Presente em outra turma hoje'
+      }
+    }
+    setAlunos(rows); setPresencaState(initState); setExistingIds(idMap)
+    setMotivoState(initMotivo); setMotivoAberto(null); setAlunosLoading(false)
   }, [turmaId, dataSel])
+
+  useEffect(() => {
+    const cancelledRef = { current: false }
+    carregarAlunosEChamada({ cancelledRef })
+    return () => { cancelledRef.current = true }
+  }, [carregarAlunosEChamada])
 
   useEffect(() => {
     if (!turmaId) { setHistory([]); return }
@@ -226,6 +271,28 @@ export default function Presenca() {
   useEffect(() => { loadPainel() }, [loadPainel])
 
   // ── actions ──────────────────────────────────────────────────────────────────
+
+  function abrirJustificar(aluno) {
+    setJustForm({ data_inicio: dataSel, data_fim: dataSel, motivo: '' })
+    setJustModalAluno(aluno)
+  }
+
+  async function salvarJustificativa() {
+    if (!justModalAluno || !justForm.data_inicio || !justForm.data_fim || !justForm.motivo.trim()) return
+    setSavingJust(true)
+    const { error } = await supabase.from('justificativas_ausencia').insert({
+      aluno_id: justModalAluno.id,
+      data_inicio: justForm.data_inicio,
+      data_fim: justForm.data_fim,
+      motivo: justForm.motivo.trim(),
+      criado_por: profile?.id ?? null,
+    })
+    setSavingJust(false)
+    if (!error) {
+      setJustModalAluno(null)
+      carregarAlunosEChamada({ cancelledRef: { current: false } })
+    }
+  }
 
   function toggle(alunoId, value) {
     setPresencaState(prev => ({ ...prev, [alunoId]: value }))
@@ -475,7 +542,16 @@ export default function Presenca() {
                         {nomesDuplos.has((aluno.nome ?? '').trim().toLowerCase()) && (
                           <span className="text-[10px] font-semibold text-amber-700 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded flex-shrink-0" title="Há outro aluno com o mesmo nome nesta turma">⚠️ Nome repetido</span>
                         )}
+                        {outrasTurmasDoAluno(aluno).map(nome => (
+                          <span key={nome} className="text-[10px] font-semibold text-blue-700 bg-blue-100 border border-blue-300 px-1.5 py-0.5 rounded flex-shrink-0" title="Aluno com matrícula dupla — presença em uma turma não vira falta na outra">🔀 também em: {nome}</span>
+                        ))}
                         {!ativo && <span className="text-[10px] text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">{aluno.status}</span>}
+                        {ativo && editavel && (
+                          <button onClick={() => abrirJustificar(aluno)}
+                            className="text-[10px] font-medium text-slate-400 hover:text-primary-600 flex items-center gap-0.5 px-1.5 py-0.5 rounded hover:bg-primary-50 dark:hover:bg-primary-900/20 flex-shrink-0">
+                            📅 Justificar período
+                          </button>
+                        )}
                       </div>
                       {ativo ? (
                         <div className="space-y-1">
@@ -781,6 +857,43 @@ export default function Presenca() {
           </div>
         )}
       </div>
+
+      {/* Modal — Justificar Ausência (antecipada, vale para todas as turmas do aluno) */}
+      <Modal open={!!justModalAluno} onClose={() => setJustModalAluno(null)} title={`Justificar ausência — ${justModalAluno?.nome ?? ''}`} size="sm">
+        <div className="space-y-3">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Vale para todas as turmas do aluno no período. Durante esse intervalo, a chamada já marca "Justificado" automaticamente com o motivo abaixo.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">De</label>
+              <input type="date" value={justForm.data_inicio}
+                onChange={e => setJustForm(f => ({ ...f, data_inicio: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"/>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Até</label>
+              <input type="date" value={justForm.data_fim}
+                onChange={e => setJustForm(f => ({ ...f, data_fim: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"/>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Motivo</label>
+            <input type="text" value={justForm.motivo}
+              onChange={e => setJustForm(f => ({ ...f, motivo: e.target.value }))}
+              placeholder="Ex: viagem em família, atestado médico, matriculado em outra turma…"
+              className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"/>
+          </div>
+          <div className="flex gap-2 justify-end pt-2">
+            <Button variant="secondary" size="sm" onClick={() => setJustModalAluno(null)}>Cancelar</Button>
+            <Button size="sm" onClick={salvarJustificativa}
+              disabled={savingJust || !justForm.data_inicio || !justForm.data_fim || !justForm.motivo.trim()}>
+              {savingJust ? 'Salvando…' : 'Salvar'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

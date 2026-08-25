@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { ThemeProvider } from './contexts/ThemeContext'
+import { PermissoesProvider } from './contexts/PermissoesContext'
 import App from './App'
 import './index.css'
 import 'leaflet/dist/leaflet.css'
@@ -12,7 +13,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <BrowserRouter>
       <ThemeProvider>
         <AuthProvider>
-          <App />
+          <PermissoesProvider>
+            <App />
+          </PermissoesProvider>
         </AuthProvider>
       </ThemeProvider>
     </BrowserRouter>

@@ -10,7 +10,7 @@ import Modal from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import {
   ArrowLeft, Phone, Mail, MapPin, Calendar, User, Stethoscope,
-  Plus, Paperclip, CheckCircle2, Circle, Clock, Pencil, Trash2
+  Plus, Paperclip, CheckCircle2, Circle, Clock, Pencil, Trash2, CalendarClock
 } from 'lucide-react'
 
 function calcIdade(dataNasc) {
@@ -58,6 +58,7 @@ function TabBtn({ active, onClick, children }) {
 }
 
 const EMPTY_AT = { data_emissao: '', data_validade: '', observacao: '', arquivo_url: '' }
+const EMPTY_JUST = { data_inicio: '', data_fim: '', motivo: '' }
 
 export default function AlunoDetalhe() {
   const { id } = useParams()
@@ -81,6 +82,15 @@ export default function AlunoDetalhe() {
   const [savingAt, setSavingAt] = useState(false)
   const [deletandoAt, setDeletandoAt] = useState(null)
   const fileRef = useRef(null)
+
+  // Justificativas de ausência antecipada
+  const [justificativas, setJustificativas] = useState([])
+  const [loadingJust, setLoadingJust] = useState(true)
+  const [justModalOpen, setJustModalOpen] = useState(false)
+  const [editingJust, setEditingJust] = useState(null)
+  const [justForm, setJustForm] = useState(EMPTY_JUST)
+  const [savingJust, setSavingJust] = useState(false)
+  const [deletandoJust, setDeletandoJust] = useState(null)
 
   // Load aluno
   useEffect(() => {
@@ -142,6 +152,39 @@ export default function AlunoDetalhe() {
     setDeletandoAt(null)
     const { data: at } = await supabase.from('atestados').select('*').eq('aluno_id', id).order('data_validade', { ascending: false })
     setAtestados(at ?? [])
+  }
+
+  // Justificativas de ausência
+  async function reloadJustificativas() {
+    setLoadingJust(true)
+    const { data } = await supabase.from('justificativas_ausencia').select('*').eq('aluno_id', id).order('data_inicio', { ascending: false })
+    setJustificativas(data ?? [])
+    setLoadingJust(false)
+  }
+  useEffect(() => { if (id) reloadJustificativas() }, [id])
+
+  function openNewJust() { setJustForm(EMPTY_JUST); setEditingJust(null); setJustModalOpen(true) }
+  function openEditJust(j) {
+    setJustForm({ data_inicio: j.data_inicio?.slice(0, 10) ?? '', data_fim: j.data_fim?.slice(0, 10) ?? '', motivo: j.motivo ?? '' })
+    setEditingJust(j); setJustModalOpen(true)
+  }
+  async function salvarJustificativa() {
+    if (!justForm.data_inicio || !justForm.data_fim || !justForm.motivo.trim()) return
+    setSavingJust(true)
+    const payload = { aluno_id: id, data_inicio: justForm.data_inicio, data_fim: justForm.data_fim, motivo: justForm.motivo.trim() }
+    if (editingJust) {
+      await supabase.from('justificativas_ausencia').update(payload).eq('id', editingJust.id)
+    } else {
+      await supabase.from('justificativas_ausencia').insert(payload)
+    }
+    setSavingJust(false)
+    setJustModalOpen(false)
+    reloadJustificativas()
+  }
+  async function deletarJustificativa() {
+    await supabase.from('justificativas_ausencia').delete().eq('id', deletandoJust.id)
+    setDeletandoJust(null)
+    reloadJustificativas()
   }
 
   function openNewAt() {
@@ -245,6 +288,7 @@ export default function AlunoDetalhe() {
         <div className="flex gap-1 bg-slate-100 dark:bg-navy-800 p-1 rounded-xl overflow-x-auto w-full md:w-fit">
           <TabBtn active={tab === 'perfil'} onClick={() => setTab('perfil')}>👤 Perfil</TabBtn>
           <TabBtn active={tab === 'frequencia'} onClick={() => setTab('frequencia')}>📊 Frequência</TabBtn>
+          <TabBtn active={tab === 'justificativas'} onClick={() => setTab('justificativas')}>📅 Justificativas</TabBtn>
           {isMelhorIdade && (
             <TabBtn active={tab === 'atestados'} onClick={() => setTab('atestados')}>🏥 Atestados</TabBtn>
           )}
@@ -374,6 +418,65 @@ export default function AlunoDetalhe() {
           </div>
         )}
 
+        {/* ─── JUSTIFICATIVAS DE AUSÊNCIA ──────────────────────────── */}
+        {tab === 'justificativas' && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold text-slate-400 dark:text-slate-600 uppercase tracking-widest">Faltas Justificadas Antecipadamente</p>
+              {canEdit && (
+                <Button size="sm" onClick={openNewJust}>
+                  <Plus size={13}/> Nova Justificativa
+                </Button>
+              )}
+            </div>
+
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-700 rounded-xl px-4 py-3 text-xs text-blue-700 dark:text-blue-300">
+              Cadastre aqui quando o aluno (ou responsável) avisar com antecedência que vai faltar — por exemplo, viagem, atestado, ou porque também está matriculado em outra turma e só vai numa por dia. A chamada aplica isso automaticamente em todas as turmas do aluno, durante o período informado.
+            </div>
+
+            {loadingJust ? (
+              <p className="text-sm text-slate-400">Carregando...</p>
+            ) : justificativas.length === 0 ? (
+              <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-8 text-center">
+                <CalendarClock size={28} className="text-slate-200 dark:text-navy-600 mx-auto mb-2" />
+                <p className="text-sm text-slate-400 dark:text-slate-500">Nenhuma justificativa cadastrada.</p>
+                {canEdit && <Button size="sm" className="mt-3" onClick={openNewJust}><Plus size={13}/> Adicionar Justificativa</Button>}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {justificativas.map(j => {
+                  const hoje = new Date().toISOString().slice(0, 10)
+                  const ativa = j.data_inicio <= hoje && hoje <= j.data_fim
+                  return (
+                    <div key={j.id} className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4 flex items-start gap-3">
+                      <CalendarClock size={16} className="text-slate-300 dark:text-slate-600 mt-0.5 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Badge color={ativa ? 'amber' : 'gray'}>{ativa ? 'Ativa hoje' : j.data_fim < hoje ? 'Encerrada' : 'Futura'}</Badge>
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                            {formatDate(j.data_inicio?.slice(0,10))}{j.data_fim !== j.data_inicio ? ` até ${formatDate(j.data_fim?.slice(0,10))}` : ''}
+                          </span>
+                        </div>
+                        <p className="text-xs text-navy-900 dark:text-white">{j.motivo}</p>
+                      </div>
+                      {canEdit && (
+                        <div className="flex gap-1 flex-shrink-0">
+                          <button onClick={() => openEditJust(j)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-navy-700 text-slate-400 hover:text-slate-600 transition-colors">
+                            <Pencil size={13}/>
+                          </button>
+                          <button onClick={() => setDeletandoJust(j)} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-500 transition-colors">
+                            <Trash2 size={13}/>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ─── ATESTADOS ───────────────────────────────────────────── */}
         {tab === 'atestados' && (
           <div className="space-y-3">
@@ -487,6 +590,39 @@ export default function AlunoDetalhe() {
 
       <ConfirmDialog open={!!deletandoAt} onClose={() => setDeletandoAt(null)} onConfirm={deletarAtestado}
         title="Excluir Atestado" description="Excluir este atestado permanentemente?" />
+
+      {/* Modal Justificativa de Ausência */}
+      <Modal open={justModalOpen} onClose={() => setJustModalOpen(false)} title={editingJust ? 'Editar Justificativa' : 'Nova Justificativa'}>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">De *</label>
+              <input type="date" value={justForm.data_inicio} onChange={e => setJustForm(f => ({ ...f, data_inicio: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Até *</label>
+              <input type="date" value={justForm.data_fim} onChange={e => setJustForm(f => ({ ...f, data_fim: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Motivo *</label>
+            <input type="text" value={justForm.motivo} onChange={e => setJustForm(f => ({ ...f, motivo: e.target.value }))}
+              placeholder="Ex: viagem em família, atestado médico…"
+              className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500" />
+          </div>
+          <div className="flex gap-2 justify-end pt-2">
+            <Button variant="secondary" size="sm" onClick={() => setJustModalOpen(false)}>Cancelar</Button>
+            <Button size="sm" onClick={salvarJustificativa} disabled={savingJust || !justForm.data_inicio || !justForm.data_fim || !justForm.motivo.trim()}>
+              {savingJust ? 'Salvando...' : 'Salvar'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <ConfirmDialog open={!!deletandoJust} onClose={() => setDeletandoJust(null)} onConfirm={deletarJustificativa}
+        title="Excluir Justificativa" description="Excluir esta justificativa? A chamada volta a não marcar automaticamente para este período." />
     </div>
   )
 }

@@ -148,7 +148,16 @@
       "Bash(gh --version)",
       "Bash(gh auth *)",
       "Bash(git config *)",
-      "Bash(git --version)"
+      "Bash(git --version)",
+      "Bash(git credential *)",
+      "Bash(cmdkey /list)",
+      "Bash(vercel --version)",
+      "Bash(git pull *)",
+      "Bash(git stash *)",
+      "mcp__visualize__read_me",
+      "mcp__visualize__show_widget",
+      "PowerShell(cd \"C:\\\\Users\\\\daly_\\\\Claude Code\\\\Smel\"; Get-ChildItem src -Recurse -File | ForEach-Object { \"{0,8} {1}\" -f \\(Get-Content $_.FullName | Measure-Object -Line\\).Lines, $_.FullName.Replace\\(\"$PWD\\\\\", \"\"\\) } | Sort-Object -Descending)",
+      "Bash(ls \"/c/Users/daly_/.claude/projects/C--Users-daly--Claude-Code-Smel/memory/\")"
     ]
   }
 }
