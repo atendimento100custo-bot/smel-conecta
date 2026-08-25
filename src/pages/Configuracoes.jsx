@@ -143,7 +143,7 @@ function GeralTab({ profile }) {
 }
 
 export default function Configuracoes() {
-  const { profile, isAdmin } = useAuth()
+  const { profile, isOwner } = useAuth()
   const [tab, setTab] = useState('geral')
 
   return (
@@ -151,7 +151,9 @@ export default function Configuracoes() {
       <Topbar title="Configurações" />
       <div className="flex-1 overflow-y-auto p-3 md:p-5 space-y-4">
 
-        {isAdmin && (
+        {/* Permissões e Infraestrutura são exclusivas do dono do sistema — uma
+            conta específica marcada no banco, não qualquer cargo admin. */}
+        {isOwner && (
           <div className="flex gap-1 bg-slate-100 dark:bg-navy-800 p-1 rounded-xl w-fit">
             <TabBtn active={tab === 'geral'} onClick={() => setTab('geral')}>Geral</TabBtn>
             <TabBtn active={tab === 'permissoes'} onClick={() => setTab('permissoes')}>Permissões</TabBtn>
@@ -160,8 +162,8 @@ export default function Configuracoes() {
         )}
 
         {tab === 'geral' && <GeralTab profile={profile} />}
-        {tab === 'permissoes' && isAdmin && <PermissoesAcessoTab />}
-        {tab === 'infra' && isAdmin && <InfraTab />}
+        {tab === 'permissoes' && isOwner && <PermissoesAcessoTab />}
+        {tab === 'infra' && isOwner && <InfraTab />}
       </div>
     </div>
   )

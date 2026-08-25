@@ -20,8 +20,8 @@ import Relatorios from './pages/Relatorios'
 import Configuracoes from './pages/Configuracoes'
 import Historico from './pages/Historico'
 
-function R({ minRole, tela, children }) {
-  return <ProtectedRoute minRole={minRole} tela={tela}>{children}</ProtectedRoute>
+function R({ minRole, tela, ownerOnly, children }) {
+  return <ProtectedRoute minRole={minRole} tela={tela} ownerOnly={ownerOnly}>{children}</ProtectedRoute>
 }
 
 export default function App() {
@@ -43,7 +43,7 @@ export default function App() {
         <Route path="melhor-idade" element={<R minRole="professor"><MelhorIdade /></R>} />
         <Route path="viagens" element={<R minRole="coordenador"><Viagens /></R>} />
         <Route path="relatorios" element={<R minRole="professor" tela="relatorios"><Relatorios /></R>} />
-        <Route path="historico" element={<R minRole="admin"><Historico /></R>} />
+        <Route path="historico" element={<R minRole="admin" ownerOnly><Historico /></R>} />
         <Route path="configuracoes" element={<Configuracoes />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

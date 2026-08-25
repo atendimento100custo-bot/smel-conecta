@@ -47,6 +47,10 @@ export function AuthProvider({ children }) {
   const isCoordenador = profile?.cargo === 'coordenador'
   const isProfessor = profile?.cargo === 'professor'
   const isEstagiario = profile?.cargo === 'estagiario'
+  // Dono do sistema — só uma conta específica (marcada no banco), não "qualquer admin".
+  // Telas de manutenção/auditoria (Histórico, Permissões, Infraestrutura) ficam só pra ele,
+  // mesmo que outras contas tenham cargo admin pra gerenciar o dia a dia.
+  const isOwner = profile?.is_owner === true
 
   function hasMinRole(minRole) {
     const order = { admin: 4, coordenador: 3, professor: 2, estagiario: 1 }
@@ -57,7 +61,7 @@ export function AuthProvider({ children }) {
     <AuthContext.Provider value={{
       user, profile, loading,
       signIn, signOut,
-      isAdmin, isCoordenador, isProfessor, isEstagiario,
+      isAdmin, isCoordenador, isProfessor, isEstagiario, isOwner,
       hasMinRole,
     }}>
       {children}

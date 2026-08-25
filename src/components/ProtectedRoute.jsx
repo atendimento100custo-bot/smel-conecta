@@ -3,8 +3,8 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { usePermissoesTela } from '../contexts/PermissoesContext'
 
-export default function ProtectedRoute({ children, minRole = 'estagiario', tela }) {
-  const { user, profile, loading, hasMinRole } = useAuth()
+export default function ProtectedRoute({ children, minRole = 'estagiario', tela, ownerOnly = false }) {
+  const { user, profile, loading, hasMinRole, isOwner } = useAuth()
   const { podeAcessar, loading: loadingPerms } = usePermissoesTela()
 
   if (loading || (tela && loadingPerms)) return (
@@ -15,6 +15,7 @@ export default function ProtectedRoute({ children, minRole = 'estagiario', tela 
 
   if (!user) return <Navigate to="/login" replace />
   if (profile && !hasMinRole(minRole)) return <Navigate to="/" replace />
+  if (profile && ownerOnly && !isOwner) return <Navigate to="/" replace />
   if (profile && tela && !podeAcessar(tela, profile.cargo)) return <Navigate to="/" replace />
 
   return children

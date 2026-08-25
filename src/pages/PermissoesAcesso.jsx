@@ -36,9 +36,9 @@ export default function PermissoesAcessoTab() {
       <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-xl px-4 py-3 text-xs text-blue-700 dark:text-blue-300 flex items-start gap-2">
         <Lock size={14} className="flex-shrink-0 mt-0.5" />
         <span>
-          Escolha quais telas cada cargo enxerga no menu. Telas de administração
-          (Supervisão, Acessos, Histórico e esta própria aba) ficam sempre
-          restritas ao admin — não aparecem aqui e nunca podem ser desligadas.
+          Escolha quais telas cada cargo enxerga no menu. Histórico e as abas
+          Permissões/Infraestrutura em Configurações ficam restritas só à conta
+          dona do sistema — não aparecem aqui e nunca podem ser desligadas.
         </span>
       </div>
 

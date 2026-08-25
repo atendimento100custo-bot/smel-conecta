@@ -31,16 +31,17 @@ const NAV = [
     label: 'Admin',
     items: [
       { to: '/relatorios', icon: BarChart2, label: 'Relatórios', minRole: 'professor', tela: 'relatorios' },
-      // Tela exclusiva de admin — nunca controlada pela matriz de permissões,
-      // pra o admin nunca correr risco de se trancar fora do próprio sistema.
-      { to: '/historico', icon: History, label: 'Histórico', minRole: 'admin' },
+      // Exclusiva do DONO do sistema (uma conta específica, marcada no banco) —
+      // não de qualquer conta com cargo admin. Nunca controlada pela matriz de
+      // permissões, pro dono nunca correr risco de se trancar fora do sistema.
+      { to: '/historico', icon: History, label: 'Histórico', minRole: 'admin', ownerOnly: true },
       { to: '/configuracoes', icon: Settings, label: 'Configurações', minRole: 'estagiario' },
     ]
   },
 ]
 
 export default function Sidebar() {
-  const { profile, hasMinRole, signOut } = useAuth()
+  const { profile, hasMinRole, isOwner, signOut } = useAuth()
   const { podeAcessar } = usePermissoesTela()
   const { dark, toggle } = useTheme()
   const { open, close } = useSidebar()
@@ -81,7 +82,7 @@ export default function Sidebar() {
       <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
         {NAV.map(section => {
           const visibleItems = section.items.filter(i =>
-            hasMinRole(i.minRole) && (!i.tela || podeAcessar(i.tela, profile?.cargo))
+            hasMinRole(i.minRole) && (!i.tela || podeAcessar(i.tela, profile?.cargo)) && (!i.ownerOnly || isOwner)
           )
           if (!visibleItems.length) return null
           return (
