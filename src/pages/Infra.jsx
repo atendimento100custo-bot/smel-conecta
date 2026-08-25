@@ -1,8 +1,9 @@
 // src/pages/Infra.jsx
+// Aba "Infraestrutura" dentro de Configurações — conteúdo de manutenção do
+// sistema (limites de plano, tamanho das tabelas). Embutida, sem Topbar próprio.
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
-import Topbar from '../components/Topbar'
 import {
   Database, Users, Server, ExternalLink, RefreshCw,
   AlertTriangle, CheckCircle, XCircle, Activity, Table2,
@@ -125,7 +126,7 @@ function TableSizes({ sizes }) {
   )
 }
 
-export default function Infra() {
+export default function InfraTab() {
   const { isAdmin } = useAuth()
   const [metrics, setMetrics] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -151,10 +152,7 @@ export default function Infra() {
   )
 
   return (
-    <div className="flex flex-col flex-1 overflow-hidden">
-    <Topbar title="Infraestrutura"/>
-    <div className="flex-1 overflow-y-auto">
-    <div className="max-w-4xl mx-auto px-4 py-6">
+    <div className="max-w-4xl px-1 py-2">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -357,8 +355,6 @@ export default function Infra() {
           )}
         </>
       )}
-    </div>
-    </div>
     </div>
   )
 }

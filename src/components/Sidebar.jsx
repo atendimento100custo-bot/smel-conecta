@@ -5,8 +5,8 @@ import { useTheme } from '../contexts/ThemeContext'
 import { useSidebar } from '../contexts/SidebarContext'
 import { usePermissoesTela } from '../contexts/PermissoesContext'
 import {
-  LayoutDashboard, MapPin, Trophy, Users, Radar, Lock,
-  UserCheck, BarChart2, Key, Settings, LogOut, Sun, Moon, X, History, Activity, ClipboardList
+  LayoutDashboard, MapPin, Trophy, Users, Radar,
+  UserCheck, BarChart2, Key, Settings, LogOut, Sun, Moon, X, History, ClipboardList
 } from 'lucide-react'
 
 const NAV = [
@@ -34,9 +34,7 @@ const NAV = [
       // pra o admin nunca correr risco de se trancar fora do próprio sistema.
       { to: '/supervisao', icon: Radar, label: 'Supervisão', minRole: 'admin' },
       { to: '/gerenciar-acesso', icon: Key, label: 'Acessos', minRole: 'admin' },
-      { to: '/permissoes-acesso', icon: Lock, label: 'Permissões', minRole: 'admin' },
       { to: '/historico', icon: History, label: 'Histórico', minRole: 'admin' },
-      { to: '/infra', icon: Activity, label: 'Infraestrutura', minRole: 'admin' },
       { to: '/configuracoes', icon: Settings, label: 'Configurações', minRole: 'estagiario' },
     ]
   },

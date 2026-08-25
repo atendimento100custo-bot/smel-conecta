@@ -1,38 +1,20 @@
 // src/pages/Presenca.jsx
 import { useState, useEffect, useCallback } from 'react'
-import { useSupabaseData } from '../hooks/useSupabaseData'
+import { useSearchParams } from 'react-router-dom'
+import { useMinhasChamadasSemana } from '../hooks/useMinhasChamadasSemana'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { logAcao } from '../lib/auditLog'
-import { useSidebar } from '../contexts/SidebarContext'
+import Topbar from '../components/Topbar'
 import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import Modal from '../components/ui/Modal'
 import {
-  Check, X, Save, Users, Clock, StopCircle, ChevronDown, ChevronUp,
-  AlertCircle, ShieldCheck, PlayCircle, List, Map as MapIcon, Menu
+  Check, X, Save, Users, Clock, StopCircle, AlertCircle, PlayCircle, AlertTriangle, CheckCircle2,
 } from 'lucide-react'
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
-import L from 'leaflet'
-import { usePoloCoords } from '../hooks/usePoloCoords'
-import { VR_CENTER } from '../lib/voltaRedondaCoords'
-
-// Leaflet marker icons
-const mkIcon = (color) => new L.Icon({
-  iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
-})
-const ICON_GREEN  = mkIcon('green')
-const ICON_ORANGE = mkIcon('orange')
-const ICON_RED    = mkIcon('red')
-const ICON_GREY   = mkIcon('grey')
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 function todayIso() { return new Date().toISOString().slice(0, 10) }
-function prevDay(iso) {
-  const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10)
-}
 function date7daysAgoIso() {
   const d = new Date(); d.setDate(d.getDate() - 6); return d.toISOString().slice(0, 10)
 }
@@ -53,40 +35,19 @@ function fmtDate(iso) {
 
 // ─── main component ───────────────────────────────────────────────────────────
 export default function Presenca() {
-  const { profile, isAdmin, isCoordenador, isProfessor } = useAuth()
-  const { toggle: toggleSidebar } = useSidebar()
+  const { profile, isAdmin } = useAuth()
+  const [searchParams] = useSearchParams()
 
-  // ── turmas ──────────────────────────────────────────────────────────────────
-  const { data: allTurmas, loading: turmasLoading } = useSupabaseData(
-    'turmas', '*, modalidades(nome), polos(id,nome,bairro,tipo), profiles(nome)'
-  )
-  // Todos os polos do sistema (para o filtro "Todos os polos")
-  const { data: allPolos } = useSupabaseData('polos')
-  const [myTurmaIds, setMyTurmaIds] = useState(null)
-
-  useEffect(() => {
-    if (!profile) return
-    if (isAdmin || isCoordenador) { setMyTurmaIds(null); return }
-    supabase.from('atribuicoes').select('turma_id').eq('usuario_id', profile.id)
-      .not('turma_id', 'is', null)
-      .then(({ data }) => setMyTurmaIds((data ?? []).map(a => a.turma_id)))
-  }, [profile, isAdmin, isCoordenador])
-
-  const turmas = (() => {
-    if (!profile || turmasLoading) return []
-    if (isAdmin || isCoordenador) return allTurmas
-    if (myTurmaIds === null) return []
-    const ids = new Set(myTurmaIds ?? [])
-    return allTurmas.filter(t => ids.has(t.id) || (isProfessor && t.professor_id === profile.id))
-  })()
+  // ── minhas turmas + adesão da semana (escopado por cargo) ───────────────────
+  const {
+    loading: minhasLoading, turmas, chamadasPorTurma, hoje,
+    pctSemana, totalFeito, totalEsperado, pendencias,
+  } = useMinhasChamadasSemana()
 
   // ── state ───────────────────────────────────────────────────────────────────
   const [dataSel,    setDataSel]    = useState(todayIso())
-  const [turmaId,    setTurmaId]    = useState('')
-  const [viewMode,   setViewMode]   = useState('lista') // 'lista' | 'mapa'
+  const [turmaId,    setTurmaId]    = useState(searchParams.get('turma') ?? '')
   const [filtroPolo, setFiltroPolo] = useState('')
-  const [filtroMod,  setFiltroMod]  = useState('')
-  const [filtroStatus, setFiltroStatus] = useState('')  // '' | 'ok' | 'pendente'
 
   // ── chamada ─────────────────────────────────────────────────────────────────
   const [chamada,        setChamada]        = useState(null)
@@ -110,21 +71,7 @@ export default function Presenca() {
   const [justForm,       setJustForm]       = useState({ data_inicio: '', data_fim: '', motivo: '' })
   const [savingJust,     setSavingJust]     = useState(false)
 
-  // ── painel ──────────────────────────────────────────────────────────────────
-  const [painelData,    setPainelData]    = useState([])
-  const [painelLoading, setPainelLoading] = useState(false)
-  const [painelOpen,    setPainelOpen]    = useState(true)
-
-  // ── mapa coords ─────────────────────────────────────────────────────────────
-  const todosPolosUnicos = [...new Map(
-    turmas.map(t => [t.polo_id, { id: t.polo_id, nome: t.polos?.nome, bairro: t.polos?.bairro, endereco: t.polos?.endereco }])
-  ).values()].filter(p => p.id)
-  const { coords: poloCoords } = usePoloCoords(viewMode === 'mapa' ? todosPolosUnicos : [])
-
   // ── derivados ────────────────────────────────────────────────────────────────
-  const hoje         = todayIso()
-  const dataAnterior = prevDay(dataSel)
-
   function isEditavel() {
     if (!dataSel) return false
     if (isAdmin) return true
@@ -149,7 +96,7 @@ export default function Presenca() {
   )
   // Nome amigável de cada turma — usado pra avisar "também matriculado em X"
   const turmaNomeById = {}
-  for (const t of allTurmas ?? []) {
+  for (const t of turmas ?? []) {
     turmaNomeById[t.id] = `${t.modalidades?.nome ?? 'Turma'}${t.polos?.bairro ? ' · ' + t.polos.bairro : ''}`
   }
   function outrasTurmasDoAluno(aluno) {
@@ -162,6 +109,21 @@ export default function Presenca() {
   const totalFaltas       = alunosAtivos.filter(a => presencaState[a.id] === 'falta').length
   const totalJustificados = alunosAtivos.filter(a => presencaState[a.id] === 'justificado').length
   const totalNaoMarcados  = alunosAtivos.filter(a => !(a.id in presencaState)).length
+
+  // Agrupamento por polo, pra listar as turmas selecionáveis
+  const todosPolosFiltro = [...new Map(
+    turmas.map(t => [t.polos?.id ?? t.polo_id, { id: t.polos?.id ?? t.polo_id, bairro: t.polos?.bairro, nome: t.polos?.nome, tipo: t.polos?.tipo }])
+  ).values()].filter(p => p.id).sort((a, b) => (a.bairro ?? a.nome ?? '').localeCompare(b.bairro ?? b.nome ?? '', 'pt-BR'))
+
+  const turmasFiltradas = turmas.filter(t => !filtroPolo || (t.polos?.id ?? t.polo_id) === filtroPolo)
+  const porPolo = {}
+  for (const t of turmasFiltradas) {
+    const poloId = t.polos?.id ?? t.polo_id ?? 'sem-polo'
+    const label = t.polos?.bairro ?? t.polos?.nome ?? 'Sem polo'
+    if (!porPolo[poloId]) porPolo[poloId] = { label, turmas: [] }
+    porPolo[poloId].turmas.push(t)
+  }
+  const polosOrdenados = Object.entries(porPolo).sort(([, a], [, b]) => a.label.localeCompare(b.label, 'pt-BR'))
 
   // ── effects ──────────────────────────────────────────────────────────────────
 
@@ -247,28 +209,6 @@ export default function Presenca() {
       .then(({ data }) => { if (!cancelled) { setHistory(data ?? []); setHistoryLoading(false) } })
     return () => { cancelled = true }
   }, [turmaId])
-
-  const loadPainel = useCallback(async () => {
-    if (!profile || !turmas.length) { setPainelData([]); setPainelLoading(false); return }
-    setPainelLoading(true)
-    const ids = turmas.map(t => t.id)
-    const { data: chamadas } = await supabase.from('chamadas').select('*')
-      .in('turma_id', ids).gte('data', dataAnterior).lte('data', dataSel)
-      .order('data', { ascending: false })
-    const map = {}
-    for (const c of chamadas ?? []) {
-      if (!map[c.turma_id]) map[c.turma_id] = {}
-      map[c.turma_id][c.data] = c
-    }
-    setPainelData(turmas.map(t => ({
-      turma: t,
-      hoje: map[t.id]?.[dataSel] ?? null,
-      ontem: map[t.id]?.[dataAnterior] ?? null,
-    })))
-    setPainelLoading(false)
-  }, [turmas, profile, dataSel])
-
-  useEffect(() => { loadPainel() }, [loadPainel])
 
   // ── actions ──────────────────────────────────────────────────────────────────
 
@@ -370,51 +310,8 @@ export default function Presenca() {
       const { data: histData } = await supabase.from('presencas').select('*')
         .eq('turma_id', turmaId).gte('data', date7daysAgoIso())
       setHistory(histData ?? [])
-      loadPainel()
       setTimeout(() => setSaveMsg(null), 6000)
     }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Derivados para o painel
-  // Lista TODOS os polos do sistema (não só os com turma) — para o filtro
-  const todosPolosFiltro = (allPolos ?? [])
-    .map(p => ({ id: p.id, bairro: p.bairro, nome: p.nome, tipo: p.tipo }))
-    .sort((a, b) => (a.bairro ?? a.nome ?? '').localeCompare(b.bairro ?? b.nome ?? '', 'pt-BR'))
-
-  const todasMods = [...new Set(painelData.map(({ turma }) => turma.modalidades?.nome ?? 'Sem modalidade'))]
-    .sort((a, b) => a.localeCompare(b, 'pt-BR'))
-
-  const dadosFiltrados = painelData.filter(({ turma, hoje: hj }) => {
-    if (filtroPolo && turma.polo_id !== filtroPolo) return false
-    if (filtroMod && (turma.modalidades?.nome ?? '') !== filtroMod) return false
-    if (filtroStatus === 'ok' && !hj) return false
-    if (filtroStatus === 'pendente' && hj) return false
-    return true
-  })
-  const pendentesHoje = painelData.filter(({ hoje: hj }) => !hj).length
-  const temFiltro = filtroPolo || filtroMod || filtroStatus
-
-  const porPolo = {}
-  for (const item of dadosFiltrados) {
-    const poloId   = item.turma.polo_id ?? 'sem-polo'
-    const poloBairro = item.turma.polos?.bairro ?? item.turma.polos?.nome ?? 'Sem polo'
-    const poloNome = item.turma.polos?.nome ?? 'Sem polo'
-    const poloTipo = item.turma.polos?.tipo ?? ''
-    const modNome  = item.turma.modalidades?.nome ?? 'Sem modalidade'
-    if (!porPolo[poloId]) porPolo[poloId] = { bairro: poloBairro, nome: poloNome, tipo: poloTipo, mods: {} }
-    if (!porPolo[poloId].mods[modNome]) porPolo[poloId].mods[modNome] = []
-    porPolo[poloId].mods[modNome].push(item)
-  }
-  const polosOrdenados = Object.entries(porPolo).sort(([,a],[,b]) => a.bairro.localeCompare(b.bairro,'pt-BR'))
-
-  // Status de cada polo para o mapa
-  const poloStatusMap = {}
-  for (const item of painelData) {
-    const pid = item.turma.polo_id
-    if (!poloStatusMap[pid]) poloStatusMap[pid] = { total: 0, comChamada: 0, bairro: item.turma.polos?.bairro ?? '', nome: item.turma.polos?.nome ?? '' }
-    poloStatusMap[pid].total++
-    if (item.hoje) poloStatusMap[pid].comChamada++
   }
 
   const sCls = 'text-xs border border-slate-200 dark:border-navy-600 bg-white dark:bg-navy-700 text-navy-900 dark:text-white rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500'
@@ -422,7 +319,35 @@ export default function Presenca() {
   // ─────────────────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
+      <Topbar title="Presença" />
       <div className="flex-1 overflow-y-auto p-3 md:p-5 space-y-4">
+
+        {/* ── Resumo pessoal da semana — professor, estagiário e coordenador ── */}
+        {!isAdmin && !minhasLoading && turmas.length > 0 && (
+          <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-bold text-navy-900 dark:text-white">Sua semana</p>
+              <span className={`text-xs font-extrabold ${pctSemana === 100 ? 'text-emerald-600' : pctSemana >= 50 ? 'text-amber-500' : 'text-red-500'}`}>
+                {totalFeito}/{totalEsperado} · {pctSemana}%
+              </span>
+            </div>
+            <div className="h-1.5 bg-slate-100 dark:bg-navy-700 rounded-full overflow-hidden mb-2">
+              <div className={`h-full rounded-full ${pctSemana === 100 ? 'bg-emerald-500' : pctSemana >= 50 ? 'bg-amber-400' : 'bg-red-400'}`}
+                style={{ width: `${pctSemana}%` }} />
+            </div>
+            {pendencias.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {pendencias.map(l => (
+                  <span key={l.turma.id} className="text-[10px] px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 flex items-center gap-1">
+                    <AlertTriangle size={10} /> {l.turma.modalidades?.nome ?? '—'} ({l.pendente} pendente{l.pendente > 1 ? 's' : ''})
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><CheckCircle2 size={11} /> Tudo em dia essa semana.</p>
+            )}
+          </div>
+        )}
 
         {/* ── Seção de presença da turma selecionada ── */}
         {turmaId && (
@@ -447,6 +372,9 @@ export default function Presenca() {
                 )}
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
+                <input type="date" value={dataSel}
+                  onChange={e => { setDataSel(e.target.value); setSaveMsg(null) }}
+                  className={sCls}/>
                 {!chamadaLoading && chamadaAberta && (
                   <>
                     <span className="text-[10px] font-medium text-blue-600 dark:text-blue-400 flex items-center gap-1">
@@ -650,206 +578,63 @@ export default function Presenca() {
           </div>
         )}
 
-        {/* ── Painel de Verificação (lista ou mapa) ── */}
+        {/* ── Selecionar Turma ── */}
         {turmas.length > 0 && (
           <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700">
-
-            {/* Cabeçalho do painel com data e toggle lista/mapa integrados */}
             <div className="px-4 py-3 flex items-center gap-3 flex-wrap border-b border-slate-100 dark:border-navy-700">
-              <button onClick={toggleSidebar}
-                className="md:hidden p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-navy-700 transition-colors flex-shrink-0">
-                <Menu size={17}/>
-              </button>
-              <button onClick={() => setPainelOpen(v => !v)} className="flex items-center gap-2 flex-1 min-w-0 hover:opacity-80 transition-opacity">
-                <ShieldCheck size={15} className="text-primary-500 flex-shrink-0"/>
-                <span className="text-sm font-bold text-navy-900 dark:text-white truncate">
-                  {isAdmin ? 'Painel de Verificação — Todos os Polos' : isCoordenador ? 'Painel de Verificação — Meus Polos' : 'Painel de Verificação — Minhas Chamadas'}
-                </span>
-                {pendentesHoje > 0 && (
-                  <span className="text-[10px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-2 py-0.5 rounded-full font-bold flex-shrink-0">
-                    ⚠️ {pendentesHoje} sem chamada
-                  </span>
-                )}
-              </button>
-
-              {/* Toggle Lista / Mapa */}
-              <div className="flex rounded-lg border border-slate-200 dark:border-navy-600 overflow-hidden flex-shrink-0">
-                <button onClick={() => setViewMode('lista')}
-                  className={`px-2.5 py-1.5 text-xs font-semibold flex items-center gap-1 transition-colors ${viewMode === 'lista' ? 'bg-primary-600 text-white' : 'bg-white dark:bg-navy-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50'}`}>
-                  <List size={12}/> Lista
-                </button>
-                <button onClick={() => setViewMode('mapa')}
-                  className={`px-2.5 py-1.5 text-xs font-semibold flex items-center gap-1 border-l border-slate-200 dark:border-navy-600 transition-colors ${viewMode === 'mapa' ? 'bg-primary-600 text-white' : 'bg-white dark:bg-navy-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50'}`}>
-                  <MapIcon size={12}/> Mapa
-                </button>
-              </div>
-
-              {/* Data — integrada no cabeçalho */}
-              <input type="date" value={dataSel}
-                onChange={e => { setDataSel(e.target.value); setSaveMsg(null) }}
-                className="text-xs border border-slate-200 dark:border-navy-600 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-navy-700 text-navy-900 dark:text-white flex-shrink-0"/>
-
-              <button onClick={() => setPainelOpen(v => !v)} className="flex-shrink-0">
-                {painelOpen ? <ChevronUp size={15} className="text-slate-400"/> : <ChevronDown size={15} className="text-slate-400"/>}
-              </button>
+              <span className="text-sm font-bold text-navy-900 dark:text-white flex-1 min-w-0">
+                {isAdmin ? 'Selecionar Turma' : 'Minhas Turmas'}
+              </span>
+              {todosPolosFiltro.length > 1 && (
+                <select value={filtroPolo} onChange={e => setFiltroPolo(e.target.value)} className={sCls}>
+                  <option value="">Todos os polos</option>
+                  {todosPolosFiltro.map(p => (
+                    <option key={p.id} value={p.id}>📍 {p.bairro || p.nome}{p.tipo ? ` — ${p.tipo}` : ''}</option>
+                  ))}
+                </select>
+              )}
             </div>
-
-            {painelOpen && (
-              <>
-                {/* Filtros */}
-                <div className="px-4 py-2.5 bg-slate-50/60 dark:bg-navy-900/30 border-b border-slate-100 dark:border-navy-700 flex items-center gap-2 flex-wrap">
-                  {todosPolosFiltro.length > 1 && (
-                    <select value={filtroPolo} onChange={e => setFiltroPolo(e.target.value)} className={sCls}>
-                      <option value="">Todos os polos</option>
-                      {todosPolosFiltro.map(p => (
-                        <option key={p.id} value={p.id}>
-                          📍 {p.bairro || p.nome}{p.tipo ? ` — ${p.tipo}` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  {todasMods.length > 1 && (
-                    <select value={filtroMod} onChange={e => setFiltroMod(e.target.value)} className={sCls}>
-                      <option value="">Todas as modalidades</option>
-                      {todasMods.map(m => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                  )}
-                  <select value={filtroStatus} onChange={e => setFiltroStatus(e.target.value)} className={sCls}>
-                    <option value="">Todos os status</option>
-                    <option value="ok">✅ Com chamada</option>
-                    <option value="pendente">⚠️ Sem chamada</option>
-                  </select>
-                  {temFiltro && (
-                    <button onClick={() => { setFiltroPolo(''); setFiltroMod(''); setFiltroStatus('') }}
-                      className="text-[11px] text-slate-400 hover:text-slate-600 flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-navy-700 transition-colors">
-                      <X size={11}/> Limpar
-                    </button>
-                  )}
-                  <span className="ml-auto text-[10px] text-slate-400">
-                    {dadosFiltrados.length} turma{dadosFiltrados.length !== 1 ? 's' : ''}{temFiltro && ` de ${painelData.length}`}
-                  </span>
-                </div>
-
-                {/* Conteúdo: lista ou mapa */}
-                {viewMode === 'mapa' ? (
-                  <div style={{ height: '60vh' }}>
-                    <MapContainer center={VR_CENTER} zoom={12} style={{ height: '100%', width: '100%' }} scrollWheelZoom>
-                      <TileLayer
-                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                      />
-                      {Object.entries(poloStatusMap).map(([pid, ps]) => {
-                        const coords = poloCoords[pid]
-                        if (!coords) return null
-                        const pct = ps.total > 0 ? ps.comChamada / ps.total : 0
-                        const icon = pct === 1 ? ICON_GREEN : pct > 0 ? ICON_ORANGE : ICON_RED
+            <div className="divide-y divide-slate-100 dark:divide-navy-700">
+              {polosOrdenados.map(([poloId, polo]) => (
+                <div key={poloId}>
+                  <div className="px-4 py-2 bg-slate-50 dark:bg-navy-900/40">
+                    <span className="text-xs font-bold text-navy-900 dark:text-white">📍 {polo.label}</span>
+                  </div>
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {polo.turmas.map(turma => {
+                        const feita = !!chamadasPorTurma[turma.id]?.[hoje]
                         return (
-                          <Marker key={pid} position={coords} icon={icon}>
-                            <Popup>
-                              <div style={{ minWidth: 180 }}>
-                                <p style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 4 }}>📍 {ps.bairro}</p>
-                                <p style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>{ps.nome}</p>
-                                <p style={{ fontSize: 12, marginBottom: 4 }}>
-                                  {ps.comChamada}/{ps.total} turmas com chamada em {fmtDate(dataSel)}
-                                </p>
-                                <p style={{ fontSize: 11, color: pct === 1 ? '#16a34a' : pct > 0 ? '#d97706' : '#dc2626' }}>
-                                  {pct === 1 ? '✅ Todas registradas' : pct > 0 ? '🟡 Parcial' : '⚠️ Nenhuma registrada'}
-                                </p>
-                              </div>
-                            </Popup>
-                          </Marker>
+                          <tr key={turma.id} onClick={() => { setTurmaId(turma.id); setSaveMsg(null) }}
+                            className={`cursor-pointer transition-colors border-t border-slate-50 dark:border-navy-700/50 ${turmaId === turma.id ? 'bg-primary-50 dark:bg-primary-900/20' : 'hover:bg-slate-50/60 dark:hover:bg-navy-700/20'}`}>
+                            <td className="px-4 py-2.5">
+                              <p className={`font-semibold text-[11px] ${turmaId === turma.id ? 'text-primary-700 dark:text-primary-400' : 'text-navy-900 dark:text-white'}`}>
+                                {turma.modalidades?.emoji} {turma.modalidades?.nome ?? 'Turma'} · {turma.faixa}
+                                {turmaId === turma.id && <span className="ml-2 text-[9px] bg-primary-100 dark:bg-primary-900/40 text-primary-600 px-1.5 py-0.5 rounded-full">selecionada</span>}
+                              </p>
+                              <p className="text-[10px] text-slate-400">
+                                {turma.dias?.join(', ') ?? '—'} · {turma.horario?.slice(0,5) ?? '—'}
+                                {turma.profiles?.nome ? ` · ${turma.profiles.nome}` : ''}
+                              </p>
+                            </td>
+                            <td className="px-3 py-2.5 text-right w-28">
+                              {feita
+                                ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400"><CheckCircle2 size={11}/> Feita hoje</span>
+                                : <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-400"><AlertTriangle size={11}/> Pendente</span>}
+                            </td>
+                          </tr>
                         )
                       })}
-                    </MapContainer>
-                    <div className="px-4 py-2 border-t border-slate-100 dark:border-navy-700 flex items-center gap-4 text-[10px] text-slate-500">
-                      <span className="flex items-center gap-1">🟢 Todas ok</span>
-                      <span className="flex items-center gap-1">🟡 Parcial</span>
-                      <span className="flex items-center gap-1">🔴 Nenhuma</span>
-                    </div>
-                  </div>
-                ) : painelLoading ? (
-                  <div className="p-6 text-center text-sm text-slate-400">Carregando…</div>
-                ) : dadosFiltrados.length === 0 ? (
-                  <div className="p-8 text-center text-sm text-slate-400">
-                    {temFiltro ? 'Nenhuma turma para esses filtros.' : 'Nenhum dado.'}
-                  </div>
-                ) : (
-                  <div className="divide-y divide-slate-100 dark:divide-navy-700">
-                    {polosOrdenados.map(([poloId, polo]) => {
-                      const totalT = Object.values(polo.mods).flat().length
-                      const semHj  = Object.values(polo.mods).flat().filter(({ hoje: hj }) => !hj).length
-                      const comHj  = totalT - semHj
-                      return (
-                        <div key={poloId}>
-                          {/* Polo header */}
-                          <div className="px-4 py-2.5 bg-slate-50 dark:bg-navy-900/40 flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-xs font-bold text-navy-900 dark:text-white truncate">
-                                📍 {polo.bairro || polo.nome}{polo.tipo ? ` — ${polo.tipo}` : ''} <span className="font-normal text-slate-500 dark:text-slate-400 text-[10px]">— {polo.nome}</span>
-                              </span>
-                              <span className="text-[10px] text-slate-400 flex-shrink-0">{totalT} turma{totalT !== 1 ? 's' : ''}</span>
-                              {comHj > 0 && <span className="text-[9px] bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">{comHj} ok</span>}
-                            </div>
-                            {semHj > 0 && <span className="text-[9px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-1.5 py-0.5 rounded-full font-bold flex-shrink-0">⚠️ {semHj} pendente{semHj !== 1 ? 's' : ''}</span>}
-                          </div>
-
-                          {/* Modalidades */}
-                          {Object.entries(polo.mods).sort(([a],[b]) => a.localeCompare(b,'pt-BR')).map(([modNome, items]) => (
-                            <div key={modNome}>
-                              <div className="px-5 py-1.5 bg-slate-100/60 dark:bg-navy-800/60 border-t border-slate-100 dark:border-navy-700 flex items-center gap-2">
-                                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{modNome}</span>
-                                <span className="text-[9px] text-slate-400">{items.length} turma{items.length !== 1 ? 's' : ''}</span>
-                              </div>
-                              <table className="w-full text-xs">
-                                <tbody>
-                                  {items.map(({ turma, hoje: hj, ontem: ont }) => (
-                                    <tr key={turma.id}
-                                      onClick={() => { setTurmaId(turma.id); setSaveMsg(null) }}
-                                      className={`border-t border-slate-50 dark:border-navy-700/50 cursor-pointer transition-colors ${turmaId === turma.id ? 'bg-primary-50 dark:bg-primary-900/20' : 'hover:bg-slate-50/60 dark:hover:bg-navy-700/20'}`}>
-                                      <td className="px-6 py-2.5">
-                                        <p className={`font-semibold text-[11px] ${turmaId === turma.id ? 'text-primary-700 dark:text-primary-400' : 'text-navy-900 dark:text-white'}`}>
-                                          {turma.faixa ?? '—'}{turma.faixa_etaria ? ` · ${turma.faixa_etaria}` : ''}
-                                          {turmaId === turma.id && <span className="ml-2 text-[9px] bg-primary-100 dark:bg-primary-900/40 text-primary-600 px-1.5 py-0.5 rounded-full">selecionada</span>}
-                                        </p>
-                                        <p className="text-[10px] text-slate-400">
-                                          {turma.dias?.join(', ') ?? '—'} · {turma.horario?.slice(0,5) ?? '—'}
-                                          {turma.profiles?.nome ? ` · ${turma.profiles.nome}` : ''}
-                                        </p>
-                                      </td>
-                                      <td className="px-3 py-2.5 text-center w-32">
-                                        <p className="text-[9px] text-slate-400 mb-0.5">{fmtDate(dataSel)}</p>
-                                        <ChamadaBadge chamada={hj}/>
-                                      </td>
-                                      <td className="px-3 py-2.5 text-center w-32">
-                                        <p className="text-[9px] text-slate-400 mb-0.5">{fmtDate(dataAnterior)}</p>
-                                        <ChamadaBadge chamada={ont}/>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          ))}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-
-                {/* Legenda */}
-                <div className="px-4 py-2.5 border-t border-slate-100 dark:border-navy-700 flex items-center gap-4 text-[10px] text-slate-400">
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"/> Encerrada</span>
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-400 inline-block"/> Em andamento</span>
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-300 dark:bg-navy-600 inline-block"/> Não registrada</span>
-                  {viewMode === 'lista' && <span className="ml-auto text-[10px] text-primary-500">Toque em uma turma para registrar presença</span>}
+                    </tbody>
+                  </table>
                 </div>
-              </>
-            )}
+              ))}
+            </div>
           </div>
         )}
 
         {/* Empty state */}
-        {turmas.length === 0 && !turmasLoading && (
+        {turmas.length === 0 && !minhasLoading && (
           <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-10">
             <EmptyState icon={<Users size={36} className="text-slate-300"/>}
               title="Nenhuma turma disponível"
@@ -894,25 +679,6 @@ export default function Presenca() {
           </div>
         </div>
       </Modal>
-    </div>
-  )
-}
-
-// ── Badge ─────────────────────────────────────────────────────────────────────
-function ChamadaBadge({ chamada }) {
-  if (!chamada) return <span className="inline-flex items-center gap-1 text-[10px] text-slate-400"><span className="w-2 h-2 rounded-full bg-slate-300 dark:bg-navy-600 inline-block"/> —</span>
-  if (chamada.encerrada_em) return (
-    <div>
-      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"/> Encerrada</span>
-      {chamada.frequencia_pct != null && <p className="text-[9px] text-slate-500 mt-0.5">{chamada.frequencia_pct}% · {chamada.total_presentes}/{chamada.total_alunos}</p>}
-      <p className="text-[9px] text-slate-400">{new Date(chamada.encerrada_em).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</p>
-    </div>
-  )
-  return (
-    <div>
-      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-600 dark:text-blue-400"><span className="w-2 h-2 rounded-full bg-blue-400 inline-block"/> Aberta</span>
-      {chamada.frequencia_pct != null && <p className="text-[9px] text-slate-500 mt-0.5">{chamada.frequencia_pct}% salvo</p>}
-      <p className="text-[9px] text-slate-400">{new Date(chamada.iniciada_em).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</p>
     </div>
   )
 }

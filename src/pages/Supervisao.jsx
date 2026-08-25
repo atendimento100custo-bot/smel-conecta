@@ -4,26 +4,7 @@ import { useSupabaseData } from '../hooks/useSupabaseData'
 import { supabase } from '../lib/supabase'
 import Topbar from '../components/Topbar'
 import { AlertTriangle, CheckCircle2, Radar } from 'lucide-react'
-
-const DIAS_JS = { 'Domingo': 0, 'Segunda': 1, 'Terça': 2, 'Quarta': 3, 'Quinta': 4, 'Sexta': 5, 'Sábado': 6 }
-
-function todayIso() { return new Date().toISOString().slice(0, 10) }
-function mondayOfThisWeekIso() {
-  const d = new Date()
-  const diff = (d.getDay() + 6) % 7 // 0 = segunda-feira
-  d.setDate(d.getDate() - diff)
-  return d.toISOString().slice(0, 10)
-}
-function isoRange(startIso, endIso) {
-  const out = []
-  let cur = new Date(startIso + 'T12:00:00')
-  const end = new Date(endIso + 'T12:00:00')
-  while (cur <= end) { out.push(cur.toISOString().slice(0, 10)); cur.setDate(cur.getDate() + 1) }
-  return out
-}
-function fmtDia(iso) {
-  return new Date(iso + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit' })
-}
+import { DIAS_JS, todayIso, mondayOfThisWeekIso, isoRange, fmtDiaCurto as fmtDia } from '../lib/semana'
 
 export default function Supervisao() {
   const { data: turmas, loading: loadingTurmas } = useSupabaseData(
