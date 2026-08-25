@@ -869,13 +869,15 @@ export default function PoloDetalhe() {
     return atribuicoes.some(a => a.usuario_id === profile.id && a.polo_id === id && (a.cargo === 'coordenador' || a.cargo === 'professor'))
   }, [isAdmin, isCoordenador, atribuicoes, loadingAtribuicoes, profile, id])
 
-  // Acesso ao polo: admin, coordenador global, ou tem qualquer atribuição neste polo, ou professor de alguma turma aqui
+  // Acesso ao polo: admin (livre), ou estagiário/professor/coordenador só do(s) polo(s)
+  // em que têm atribuição — coordenador não tem mais passe livre pra qualquer polo,
+  // só enxerga os outros na lista (Polos.jsx) mas não consegue abrir o detalhe deles.
   const temAcesso = useMemo(() => {
-    if (isAdmin || isCoordenador) return true
+    if (isAdmin) return true
     if (!profile || loadingAtribuicoes || loadingTurmas) return true // ainda carregando, aguardar
     if (atribuicoes.some(a => a.usuario_id === profile?.id && a.polo_id === id)) return true
     return turmasPolo.some(t => t.professor_id === profile?.id)
-  }, [isAdmin, isCoordenador, atribuicoes, loadingAtribuicoes, loadingTurmas, profile, id, turmasPolo])
+  }, [isAdmin, atribuicoes, loadingAtribuicoes, loadingTurmas, profile, id, turmasPolo])
 
   useEffect(() => {
     if (!profile || loadingAtribuicoes || loadingTurmas) return // aguardar carregamento completo

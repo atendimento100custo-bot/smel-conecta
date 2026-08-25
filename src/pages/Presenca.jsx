@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMinhasChamadasSemana } from '../hooks/useMinhasChamadasSemana'
+import { useSupabaseData } from '../hooks/useSupabaseData'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { logAcao } from '../lib/auditLog'
@@ -11,7 +12,7 @@ import EmptyState from '../components/ui/EmptyState'
 import Modal from '../components/ui/Modal'
 import {
   Check, X, Save, Users, Clock, StopCircle, AlertCircle, PlayCircle, AlertTriangle, CheckCircle2,
-  Radar, ChevronDown, ChevronUp,
+  ChevronDown, ChevronUp, ClipboardList, Radar as RadarIcon,
 } from 'lucide-react'
 import { fmtDiaCurto } from '../lib/semana'
 
@@ -48,11 +49,25 @@ export default function Presenca() {
     pctSemana, totalFeito, totalEsperado, pendencias,
   } = useMinhasChamadasSemana()
 
+  // Atribuições de professor por turma — fonte mais confiável que turmas.professor_id
+  // (que fica desatualizado quando o vínculo é feito só em Equipe). Sem isso, turmas
+  // com professor de verdade apareciam agrupadas em "Sem professor" na Supervisão.
+  const { data: atribProfessores } = useSupabaseData('atribuicoes', 'turma_id,cargo,profiles(nome)')
+  const professorPorTurma = {}
+  for (const a of atribProfessores ?? []) {
+    if (a.cargo === 'professor' && a.turma_id && a.profiles?.nome) professorPorTurma[a.turma_id] = a.profiles.nome
+  }
+  function nomeProfessorDaTurma(turma) {
+    return professorPorTurma[turma.id] ?? turma.profiles?.nome ?? null
+  }
+
   // ── state ───────────────────────────────────────────────────────────────────
   const [dataSel,    setDataSel]    = useState(todayIso())
   const [turmaId,    setTurmaId]    = useState(searchParams.get('turma') ?? '')
   const [filtroPolo, setFiltroPolo] = useState('')
-  const [supervisaoOpen, setSupervisaoOpen] = useState(true)
+  const [adminTab,   setAdminTab]   = useState('supervisao') // 'supervisao' | 'chamada'
+  const [filtroStatusHoje, setFiltroStatusHoje] = useState('') // '' | 'hoje' | 'feitas' | 'pendentes'
+  const [poloAberto, setPoloAberto] = useState({}) // { [poloId]: bool } — override manual do padrão
 
   // ── chamada ─────────────────────────────────────────────────────────────────
   const [chamada,        setChamada]        = useState(null)
@@ -136,10 +151,13 @@ export default function Presenca() {
     chamadaHoje: chamadasPorTurma[l.turma.id]?.[hoje] ?? null,
     esperaHoje: l.diasEsperados.includes(hoje),
   }))
+
+  // Adesão por professor — separada em "precisa de atenção" (pendências) vs "em dia",
+  // pra não competir visualmente com quem já está tudo certo.
   const porProfessor = {}
   for (const l of linhasHoje) {
     if (l.diasEsperados.length === 0) continue // sem aula programada nesses dias — não entra na cobrança
-    const nomeProf = l.turma.profiles?.nome ?? 'Sem professor'
+    const nomeProf = nomeProfessorDaTurma(l.turma) ?? 'Sem professor definido'
     if (!porProfessor[nomeProf]) porProfessor[nomeProf] = { feitos: 0, esperados: 0, turmas: [] }
     porProfessor[nomeProf].feitos += l.diasFeitos.length
     porProfessor[nomeProf].esperados += l.diasEsperados.length
@@ -148,7 +166,29 @@ export default function Presenca() {
   const professoresOrdenados = Object.entries(porProfessor)
     .map(([nome, v]) => ({ nome, ...v, pct: v.esperados > 0 ? Math.round(v.feitos / v.esperados * 100) : 100 }))
     .sort((a, b) => a.pct - b.pct)
+  const professoresAtencao = professoresOrdenados.filter(p => p.pct < 100)
+  const professoresEmDia   = professoresOrdenados.filter(p => p.pct === 100)
+
   const pendentesHojeAdmin = linhasHoje.filter(l => l.esperaHoje && !l.chamadaHoje)
+
+  // Detalhe por turma — filtrado pelo card clicado, agrupado por polo (colapsável).
+  const linhasDetalhe = linhasHoje.filter(l => {
+    if (filtroStatusHoje === 'hoje') return l.esperaHoje
+    if (filtroStatusHoje === 'feitas') return l.esperaHoje && l.chamadaHoje
+    if (filtroStatusHoje === 'pendentes') return l.esperaHoje && !l.chamadaHoje
+    return true
+  })
+  const detalhePorPolo = {}
+  for (const l of linhasDetalhe) {
+    const poloId = l.turma.polos?.id ?? l.turma.polo_id ?? 'sem-polo'
+    const label = l.turma.polos?.bairro ?? l.turma.polos?.nome ?? 'Sem polo'
+    if (!detalhePorPolo[poloId]) detalhePorPolo[poloId] = { label, linhas: [] }
+    detalhePorPolo[poloId].linhas.push(l)
+  }
+  const detalhePorPoloOrdenado = Object.entries(detalhePorPolo).sort(([, a], [, b]) => a.label.localeCompare(b.label, 'pt-BR'))
+  function poloEstaAberto(poloId, temPendencia) {
+    return poloAberto[poloId] ?? (temPendencia || !!filtroStatusHoje)
+  }
 
   // ── effects ──────────────────────────────────────────────────────────────────
 
@@ -347,127 +387,178 @@ export default function Presenca() {
       <Topbar title="Presença" />
       <div className="flex-1 overflow-y-auto p-3 md:p-5 space-y-4">
 
-        {/* ── Supervisão — só admin: visão de quem fez/não fez chamada ── */}
-        {isAdmin && !minhasLoading && (
-          <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 overflow-hidden">
-            <button onClick={() => setSupervisaoOpen(v => !v)}
-              className="w-full px-4 py-3 flex items-center gap-2 hover:bg-slate-50/60 dark:hover:bg-navy-700/30 transition-colors">
-              <Radar size={15} className="text-primary-500 flex-shrink-0" />
-              <span className="text-sm font-bold text-navy-900 dark:text-white flex-1 text-left">Supervisão — esta semana</span>
+        {/* ── Sub-abas — só admin: Supervisão (visão geral) vs Chamada (fazer a chamada) ── */}
+        {isAdmin && (
+          <div className="flex gap-1 bg-slate-100 dark:bg-navy-800 p-1 rounded-xl w-fit">
+            <button onClick={() => setAdminTab('supervisao')}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${adminTab === 'supervisao' ? 'bg-primary-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-navy-700'}`}>
+              <RadarIcon size={13} /> Supervisão
               {pendentesHojeAdmin.length > 0 && (
-                <span className="text-[10px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-2 py-0.5 rounded-full font-bold flex-shrink-0">
-                  ⚠️ {pendentesHojeAdmin.length} sem chamada hoje
+                <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${adminTab === 'supervisao' ? 'bg-white/25' : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'}`}>
+                  {pendentesHojeAdmin.length}
                 </span>
               )}
-              {supervisaoOpen ? <ChevronUp size={15} className="text-slate-400" /> : <ChevronDown size={15} className="text-slate-400" />}
             </button>
-
-            {supervisaoOpen && (
-              <div className="border-t border-slate-100 dark:border-navy-700 p-4 space-y-4">
-                <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                  Semana atual ({fmtDiaCurto(segunda)} — {fmtDiaCurto(hoje)}). Considera só os dias em que cada turma tem aula programada.
-                </p>
-
-                {/* Resumo de hoje */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  <div className="bg-slate-50 dark:bg-navy-900/40 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
-                    <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1">Turmas com aula hoje</p>
-                    <p className="text-2xl font-extrabold text-navy-900 dark:text-white">{linhasHoje.filter(l => l.esperaHoje).length}</p>
-                  </div>
-                  <div className="bg-slate-50 dark:bg-navy-900/40 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
-                    <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1">Já fizeram chamada</p>
-                    <p className="text-2xl font-extrabold text-emerald-600">{linhasHoje.filter(l => l.esperaHoje && l.chamadaHoje).length}</p>
-                  </div>
-                  <div className="bg-slate-50 dark:bg-navy-900/40 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
-                    <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1">Ainda não fizeram</p>
-                    <p className="text-2xl font-extrabold text-red-500">{pendentesHojeAdmin.length}</p>
-                  </div>
-                </div>
-
-                {/* Por professor — quem está usando, quem não está */}
-                <div className="border border-slate-200 dark:border-navy-700 rounded-xl overflow-hidden">
-                  <p className="text-xs font-bold text-navy-900 dark:text-white px-4 py-3 border-b border-slate-100 dark:border-navy-700 bg-slate-50 dark:bg-navy-900/40">
-                    Adesão por professor
-                  </p>
-                  <div className="divide-y divide-slate-100 dark:divide-navy-700">
-                    {professoresOrdenados.map(p => (
-                      <div key={p.nome} className="px-4 py-3">
-                        <div className="flex items-center justify-between gap-2 mb-1.5">
-                          <span className="text-xs font-semibold text-navy-900 dark:text-white">{p.nome}</span>
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            p.pct === 100 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                            : p.pct >= 50 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-                            : 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
-                          }`}>{p.feitos}/{p.esperados} · {p.pct}%</span>
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {p.turmas.map(l => (
-                            <span key={l.turma.id} className={`text-[10px] px-2 py-1 rounded-lg flex items-center gap-1 ${
-                              l.pendente === 0 ? 'bg-slate-50 dark:bg-navy-900/40 text-slate-500 dark:text-slate-400'
-                              : 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
-                            }`}>
-                              {l.pendente === 0 ? <CheckCircle2 size={10} /> : <AlertTriangle size={10} />}
-                              {l.turma.modalidades?.nome ?? '—'} · {l.turma.polos?.bairro ?? l.turma.polos?.nome ?? '—'}
-                              {l.pendente > 0 && ` (${l.pendente} pendente${l.pendente > 1 ? 's' : ''})`}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                    {professoresOrdenados.length === 0 && (
-                      <p className="px-4 py-6 text-center text-sm text-slate-400">Nenhuma turma com aula programada nesta semana.</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Detalhe por turma */}
-                <div className="border border-slate-200 dark:border-navy-700 rounded-xl overflow-hidden">
-                  <p className="text-xs font-bold text-navy-900 dark:text-white px-4 py-3 border-b border-slate-100 dark:border-navy-700 bg-slate-50 dark:bg-navy-900/40">
-                    Detalhe por turma
-                  </p>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="bg-slate-50 dark:bg-navy-900/40">
-                          <th className="text-left px-4 py-2 font-semibold text-slate-500 whitespace-nowrap">Turma</th>
-                          <th className="text-left px-3 py-2 font-semibold text-slate-500 whitespace-nowrap">Polo</th>
-                          <th className="text-left px-3 py-2 font-semibold text-slate-500 whitespace-nowrap">Professor</th>
-                          {dias.map(d => (
-                            <th key={d} className={`px-2 py-2 font-semibold text-center whitespace-nowrap ${d === hoje ? 'text-primary-600' : 'text-slate-500'}`}>{fmtDiaCurto(d)}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-navy-700">
-                        {linhasHoje.map(l => (
-                          <tr key={l.turma.id}>
-                            <td className="px-4 py-2 font-medium text-navy-900 dark:text-white whitespace-nowrap">{l.turma.modalidades?.nome ?? '—'} · {l.turma.faixa}</td>
-                            <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{l.turma.polos?.bairro ?? l.turma.polos?.nome ?? '—'}</td>
-                            <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{l.turma.profiles?.nome ?? '—'}</td>
-                            {dias.map(d => {
-                              const esperado = l.diasEsperados.includes(d)
-                              const feito = !!chamadasPorTurma[l.turma.id]?.[d]
-                              return (
-                                <td key={d} className="px-2 py-2 text-center">
-                                  {!esperado ? <span className="text-slate-200 dark:text-navy-700">—</span>
-                                    : feito ? <CheckCircle2 size={13} className="inline text-emerald-500" />
-                                    : <AlertTriangle size={13} className="inline text-red-400" />}
-                                </td>
-                              )
-                            })}
-                          </tr>
-                        ))}
-                        {linhasHoje.length === 0 && (
-                          <tr><td colSpan={3 + dias.length} className="px-4 py-8 text-center text-slate-400">Nenhuma turma cadastrada.</td></tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            )}
+            <button onClick={() => setAdminTab('chamada')}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${adminTab === 'chamada' ? 'bg-primary-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-navy-700'}`}>
+              <ClipboardList size={13} /> Chamada
+            </button>
           </div>
         )}
 
+        {/* ── Supervisão — só admin: visão de quem fez/não fez chamada ── */}
+        {isAdmin && adminTab === 'supervisao' && !minhasLoading && (
+          <div className="space-y-4">
+            <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+              Semana atual ({fmtDiaCurto(segunda)} — {fmtDiaCurto(hoje)}). Considera só os dias em que cada turma tem aula programada.
+            </p>
+
+            {/* Resumo de hoje — cards clicáveis, filtram o Detalhe por turma abaixo */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {[
+                { key: 'hoje', label: 'Turmas com aula hoje', val: linhasHoje.filter(l => l.esperaHoje).length, color: 'text-navy-900 dark:text-white' },
+                { key: 'feitas', label: 'Já fizeram chamada', val: linhasHoje.filter(l => l.esperaHoje && l.chamadaHoje).length, color: 'text-emerald-600' },
+                { key: 'pendentes', label: 'Ainda não fizeram', val: pendentesHojeAdmin.length, color: 'text-red-500' },
+              ].map(c => (
+                <button key={c.key} onClick={() => setFiltroStatusHoje(v => v === c.key ? '' : c.key)}
+                  className={`text-left rounded-xl border p-4 transition-colors ${
+                    filtroStatusHoje === c.key
+                      ? 'border-primary-400 bg-primary-50 dark:bg-primary-900/20 ring-1 ring-primary-300 dark:ring-primary-700'
+                      : 'border-slate-200 dark:border-navy-700 bg-white dark:bg-navy-800 hover:border-primary-200 dark:hover:border-primary-800'
+                  }`}>
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1">{c.label}</p>
+                  <p className={`text-2xl font-extrabold ${c.color}`}>{c.val}</p>
+                </button>
+              ))}
+            </div>
+            {filtroStatusHoje && (
+              <button onClick={() => setFiltroStatusHoje('')} className="text-[11px] text-primary-600 hover:underline flex items-center gap-1">
+                <X size={10} /> limpar filtro no detalhe por turma
+              </button>
+            )}
+
+            {/* Adesão por professor — quem precisa de atenção primeiro, quem já está em dia fica compacto */}
+            <div className="border border-slate-200 dark:border-navy-700 rounded-xl overflow-hidden">
+              <p className="text-xs font-bold text-navy-900 dark:text-white px-4 py-3 border-b border-slate-100 dark:border-navy-700 bg-slate-50 dark:bg-navy-900/40">
+                Adesão por professor
+              </p>
+              {professoresOrdenados.length === 0 ? (
+                <p className="px-4 py-6 text-center text-sm text-slate-400">Nenhuma turma com aula programada nesta semana.</p>
+              ) : (
+                <>
+                  {professoresAtencao.length > 0 && (
+                    <div className="divide-y divide-slate-100 dark:divide-navy-700">
+                      {professoresAtencao.map(p => (
+                        <div key={p.nome} className="px-4 py-3">
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <span className="text-xs font-semibold text-navy-900 dark:text-white">{p.nome}</span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              p.pct >= 50 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                              : 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
+                            }`}>{p.feitos}/{p.esperados} · {p.pct}%</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {p.turmas.filter(l => l.pendente > 0).map(l => (
+                              <span key={l.turma.id} className="text-[10px] px-2 py-1 rounded-lg flex items-center gap-1 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400">
+                                <AlertTriangle size={10} />
+                                {l.turma.modalidades?.nome ?? '—'} · {l.turma.polos?.bairro ?? l.turma.polos?.nome ?? '—'} ({l.pendente} pendente{l.pendente > 1 ? 's' : ''})
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {professoresEmDia.length > 0 && (
+                    <details className="border-t border-slate-100 dark:border-navy-700" open={professoresAtencao.length === 0}>
+                      <summary className="px-4 py-2.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 cursor-pointer select-none flex items-center gap-1.5 hover:bg-slate-50 dark:hover:bg-navy-700/30">
+                        <CheckCircle2 size={12} /> {professoresEmDia.length} professor{professoresEmDia.length > 1 ? 'es' : ''} em dia
+                      </summary>
+                      <div className="px-4 pb-3 flex flex-wrap gap-1.5">
+                        {professoresEmDia.map(p => (
+                          <span key={p.nome} className="text-[10px] px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400">
+                            {p.nome} · {p.feitos}/{p.esperados}
+                          </span>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Detalhe por turma — agrupado por polo, colapsável */}
+            <div className="border border-slate-200 dark:border-navy-700 rounded-xl overflow-hidden">
+              <p className="text-xs font-bold text-navy-900 dark:text-white px-4 py-3 border-b border-slate-100 dark:border-navy-700 bg-slate-50 dark:bg-navy-900/40">
+                Detalhe por turma{filtroStatusHoje && <span className="font-normal text-slate-400"> — filtrado</span>}
+              </p>
+              {detalhePorPoloOrdenado.length === 0 ? (
+                <p className="px-4 py-8 text-center text-sm text-slate-400">Nenhuma turma para este filtro.</p>
+              ) : (
+                <div className="divide-y divide-slate-100 dark:divide-navy-700">
+                  {detalhePorPoloOrdenado.map(([poloId, polo]) => {
+                    const temPendencia = polo.linhas.some(l => l.pendente > 0)
+                    const aberto = poloEstaAberto(poloId, temPendencia)
+                    return (
+                      <div key={poloId}>
+                        <button onClick={() => setPoloAberto(p => ({ ...p, [poloId]: !aberto }))}
+                          className="w-full px-4 py-2.5 flex items-center gap-2 bg-slate-50/60 dark:bg-navy-900/30 hover:bg-slate-100 dark:hover:bg-navy-900/50 transition-colors">
+                          <span className="text-xs font-bold text-navy-900 dark:text-white flex-1 text-left">📍 {polo.label}</span>
+                          <span className="text-[10px] text-slate-400">{polo.linhas.length} turma{polo.linhas.length !== 1 ? 's' : ''}</span>
+                          {temPendencia && (
+                            <span className="text-[9px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-1.5 py-0.5 rounded-full font-bold">
+                              {polo.linhas.filter(l => l.pendente > 0).length} pendente{polo.linhas.filter(l => l.pendente > 0).length !== 1 ? 's' : ''}
+                            </span>
+                          )}
+                          {aberto ? <ChevronUp size={13} className="text-slate-400" /> : <ChevronDown size={13} className="text-slate-400" />}
+                        </button>
+                        {aberto && (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="bg-slate-50/60 dark:bg-navy-900/20">
+                                  <th className="text-left px-4 py-2 font-semibold text-slate-500 whitespace-nowrap">Turma</th>
+                                  <th className="text-left px-3 py-2 font-semibold text-slate-500 whitespace-nowrap">Professor</th>
+                                  {dias.map(d => (
+                                    <th key={d} className={`px-2 py-2 font-semibold text-center whitespace-nowrap ${d === hoje ? 'text-primary-600' : 'text-slate-500'}`}>{fmtDiaCurto(d)}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-50 dark:divide-navy-700/50">
+                                {polo.linhas.map(l => (
+                                  <tr key={l.turma.id} onClick={() => { setTurmaId(l.turma.id); setAdminTab('chamada'); setFiltroPolo('') }}
+                                    className="cursor-pointer hover:bg-slate-50 dark:hover:bg-navy-700/30 transition-colors">
+                                    <td className="px-4 py-2 font-medium text-navy-900 dark:text-white whitespace-nowrap">{l.turma.modalidades?.nome ?? '—'} · {l.turma.faixa}</td>
+                                    <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{nomeProfessorDaTurma(l.turma) ?? '—'}</td>
+                                    {dias.map(d => {
+                                      const esperado = l.diasEsperados.includes(d)
+                                      const feito = !!chamadasPorTurma[l.turma.id]?.[d]
+                                      return (
+                                        <td key={d} className="px-2 py-2 text-center">
+                                          {!esperado ? <span className="text-slate-200 dark:text-navy-700">—</span>
+                                            : feito ? <CheckCircle2 size={13} className="inline text-emerald-500" />
+                                            : <AlertTriangle size={13} className="inline text-red-400" />}
+                                        </td>
+                                      )
+                                    })}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Chamada — não-admin sempre; admin só na sub-aba "Chamada" ── */}
+        {(!isAdmin || adminTab === 'chamada') && (
+        <>
         {/* ── Resumo pessoal da semana — professor, estagiário e coordenador ── */}
         {!isAdmin && !minhasLoading && turmas.length > 0 && (
           <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
@@ -760,7 +851,7 @@ export default function Presenca() {
                               </p>
                               <p className="text-[10px] text-slate-400">
                                 {turma.dias?.join(', ') ?? '—'} · {turma.horario?.slice(0,5) ?? '—'}
-                                {turma.profiles?.nome ? ` · ${turma.profiles.nome}` : ''}
+                                {nomeProfessorDaTurma(turma) ? ` · ${nomeProfessorDaTurma(turma)}` : ''}
                               </p>
                             </td>
                             <td className="px-3 py-2.5 text-right w-28">
@@ -786,6 +877,8 @@ export default function Presenca() {
               title="Nenhuma turma disponível"
               description="Você ainda não foi vinculado a nenhuma turma."/>
           </div>
+        )}
+        </>
         )}
       </div>
 
