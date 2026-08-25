@@ -21,7 +21,10 @@ const NAV = [
     label: 'Gestão',
     items: [
       { to: '/polos', icon: MapPin, label: 'Polos', minRole: 'estagiario', tela: 'polos' },
-      { to: '/presenca', icon: ClipboardList, label: 'Presença', minRole: 'estagiario', tela: 'presenca' },
+      // Mesma tela por trás (Presenca.jsx), mas o nome muda pra não confundir:
+      // admin usa pra supervisionar todo mundo (Frequência), o resto só faz a
+      // própria chamada (Chamada) — cada um vê exatamente o que faz sentido pra ele.
+      { to: '/presenca', icon: ClipboardList, label: (isAdmin) => isAdmin ? 'Frequência' : 'Chamada', minRole: 'estagiario', tela: 'presenca' },
       { to: '/modalidades', icon: Trophy, label: 'Modalidades', minRole: 'coordenador', tela: 'modalidades' },
       { to: '/alunos', icon: Users, label: 'Alunos', minRole: 'professor', tela: 'alunos' },
       { to: '/equipes', icon: UserCheck, label: 'Equipe', minRole: 'coordenador', tela: 'equipes' },
@@ -41,7 +44,7 @@ const NAV = [
 ]
 
 export default function Sidebar() {
-  const { profile, hasMinRole, isOwner, signOut } = useAuth()
+  const { profile, hasMinRole, isOwner, isAdmin, signOut } = useAuth()
   const { podeAcessar } = usePermissoesTela()
   const { dark, toggle } = useTheme()
   const { open, close } = useSidebar()
@@ -105,7 +108,7 @@ export default function Sidebar() {
                   }
                 >
                   <Icon size={15} />
-                  {label}
+                  {typeof label === 'function' ? label(isAdmin) : label}
                 </NavLink>
               ))}
             </div>

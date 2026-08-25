@@ -66,7 +66,7 @@ export default function Presenca() {
   const [turmaId,    setTurmaId]    = useState(searchParams.get('turma') ?? '')
   const [filtroPolo, setFiltroPolo] = useState('')
   const [adminTab,   setAdminTab]   = useState('supervisao') // 'supervisao' | 'chamada'
-  const [filtroStatusHoje, setFiltroStatusHoje] = useState('') // '' | 'hoje' | 'feitas' | 'pendentes'
+  const [supervisaoView, setSupervisaoView] = useState('pendencias') // 'pendencias' | 'adesao' | 'polo'
   const [poloAberto, setPoloAberto] = useState({}) // { [poloId]: bool } — override manual do padrão
 
   // ── chamada ─────────────────────────────────────────────────────────────────
@@ -170,16 +170,15 @@ export default function Presenca() {
   const professoresEmDia   = professoresOrdenados.filter(p => p.pct === 100)
 
   const pendentesHojeAdmin = linhasHoje.filter(l => l.esperaHoje && !l.chamadaHoje)
-
-  // Detalhe por turma — filtrado pelo card clicado, agrupado por polo (colapsável).
-  const linhasDetalhe = linhasHoje.filter(l => {
-    if (filtroStatusHoje === 'hoje') return l.esperaHoje
-    if (filtroStatusHoje === 'feitas') return l.esperaHoje && l.chamadaHoje
-    if (filtroStatusHoje === 'pendentes') return l.esperaHoje && !l.chamadaHoje
-    return true
+  const pendentesOrdenados = [...pendentesHojeAdmin].sort((a, b) => {
+    const la = a.turma.polos?.bairro ?? a.turma.polos?.nome ?? ''
+    const lb = b.turma.polos?.bairro ?? b.turma.polos?.nome ?? ''
+    return la.localeCompare(lb, 'pt-BR') || (a.turma.modalidades?.nome ?? '').localeCompare(b.turma.modalidades?.nome ?? '', 'pt-BR')
   })
+
+  // Detalhe por turma — agrupado por polo, colapsável (aba "Detalhe por polo").
   const detalhePorPolo = {}
-  for (const l of linhasDetalhe) {
+  for (const l of linhasHoje) {
     const poloId = l.turma.polos?.id ?? l.turma.polo_id ?? 'sem-polo'
     const label = l.turma.polos?.bairro ?? l.turma.polos?.nome ?? 'Sem polo'
     if (!detalhePorPolo[poloId]) detalhePorPolo[poloId] = { label, linhas: [] }
@@ -187,7 +186,7 @@ export default function Presenca() {
   }
   const detalhePorPoloOrdenado = Object.entries(detalhePorPolo).sort(([, a], [, b]) => a.label.localeCompare(b.label, 'pt-BR'))
   function poloEstaAberto(poloId, temPendencia) {
-    return poloAberto[poloId] ?? (temPendencia || !!filtroStatusHoje)
+    return poloAberto[poloId] ?? temPendencia
   }
 
   // ── effects ──────────────────────────────────────────────────────────────────
@@ -384,7 +383,7 @@ export default function Presenca() {
   // ─────────────────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
-      <Topbar title="Presença" />
+      <Topbar title={isAdmin ? 'Frequência' : 'Chamada'} />
       <div className="flex-1 overflow-y-auto p-3 md:p-5 space-y-4">
 
         {/* ── Sub-abas — só admin: Supervisão (visão geral) vs Chamada (fazer a chamada) ── */}
@@ -409,150 +408,191 @@ export default function Presenca() {
         {/* ── Supervisão — só admin: visão de quem fez/não fez chamada ── */}
         {isAdmin && adminTab === 'supervisao' && !minhasLoading && (
           <div className="space-y-4">
-            <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-              Semana atual ({fmtDiaCurto(segunda)} — {fmtDiaCurto(hoje)}). Considera só os dias em que cada turma tem aula programada.
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Semana atual ({fmtDiaCurto(segunda)} — {fmtDiaCurto(hoje)}) · considera só os dias com aula programada.
             </p>
 
-            {/* Resumo de hoje — cards clicáveis, filtram o Detalhe por turma abaixo */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* Resumo de hoje — uma faixa só (não 3 caixas competindo) */}
+            <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 flex divide-x divide-slate-100 dark:divide-navy-700">
+              <div className="flex-1 px-5 py-4">
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Turmas com aula hoje</p>
+                <p className="text-3xl font-extrabold text-navy-900 dark:text-white leading-none">{linhasHoje.filter(l => l.esperaHoje).length}</p>
+              </div>
+              <div className="flex-1 px-5 py-4">
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Já fizeram chamada</p>
+                <p className="text-3xl font-extrabold text-emerald-600 leading-none">{linhasHoje.filter(l => l.esperaHoje && l.chamadaHoje).length}</p>
+              </div>
+              <button onClick={() => setSupervisaoView('pendencias')}
+                className="flex-1 px-5 py-4 text-left hover:bg-red-50/40 dark:hover:bg-red-900/10 rounded-r-xl transition-colors">
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Ainda não fizeram</p>
+                <p className="text-3xl font-extrabold text-red-500 leading-none">{pendentesHojeAdmin.length}</p>
+              </button>
+            </div>
+
+            {/* Sub-visões — uma coisa de cada vez, em vez de tudo empilhado */}
+            <div className="flex gap-1 bg-slate-100 dark:bg-navy-800 p-1 rounded-xl w-fit">
               {[
-                { key: 'hoje', label: 'Turmas com aula hoje', val: linhasHoje.filter(l => l.esperaHoje).length, color: 'text-navy-900 dark:text-white' },
-                { key: 'feitas', label: 'Já fizeram chamada', val: linhasHoje.filter(l => l.esperaHoje && l.chamadaHoje).length, color: 'text-emerald-600' },
-                { key: 'pendentes', label: 'Ainda não fizeram', val: pendentesHojeAdmin.length, color: 'text-red-500' },
-              ].map(c => (
-                <button key={c.key} onClick={() => setFiltroStatusHoje(v => v === c.key ? '' : c.key)}
-                  className={`text-left rounded-xl border p-4 transition-colors ${
-                    filtroStatusHoje === c.key
-                      ? 'border-primary-400 bg-primary-50 dark:bg-primary-900/20 ring-1 ring-primary-300 dark:ring-primary-700'
-                      : 'border-slate-200 dark:border-navy-700 bg-white dark:bg-navy-800 hover:border-primary-200 dark:hover:border-primary-800'
-                  }`}>
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1">{c.label}</p>
-                  <p className={`text-2xl font-extrabold ${c.color}`}>{c.val}</p>
+                { key: 'pendencias', label: 'Pendências', count: pendentesHojeAdmin.length },
+                { key: 'adesao',     label: 'Adesão por professor', count: 0 },
+                { key: 'polo',       label: 'Detalhe por polo', count: 0 },
+              ].map(t => (
+                <button key={t.key} onClick={() => setSupervisaoView(t.key)}
+                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${supervisaoView === t.key ? 'bg-primary-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-navy-700'}`}>
+                  {t.label}
+                  {t.count > 0 && (
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${supervisaoView === t.key ? 'bg-white/25' : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'}`}>
+                      {t.count}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
-            {filtroStatusHoje && (
-              <button onClick={() => setFiltroStatusHoje('')} className="text-[11px] text-primary-600 hover:underline flex items-center gap-1">
-                <X size={10} /> limpar filtro no detalhe por turma
-              </button>
+
+            {/* Pendências — lista enxuta com ação direta */}
+            {supervisaoView === 'pendencias' && (
+              <div className="border border-slate-200 dark:border-navy-700 rounded-xl overflow-hidden">
+                {pendentesOrdenados.length === 0 ? (
+                  <div className="px-4 py-10 text-center">
+                    <p className="text-2xl mb-1">🎉</p>
+                    <p className="text-sm font-semibold text-emerald-600">Tudo em dia — nenhuma turma pendente hoje.</p>
+                  </div>
+                ) : (
+                  <ul className="divide-y divide-slate-100 dark:divide-navy-700">
+                    {pendentesOrdenados.map(l => (
+                      <li key={l.turma.id} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-navy-700/30">
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-navy-900 dark:text-white truncate">
+                            {l.turma.modalidades?.nome ?? 'Turma'} · {l.turma.faixa}
+                          </p>
+                          <p className="text-[10px] text-slate-400 truncate">
+                            📍 {l.turma.polos?.bairro ?? l.turma.polos?.nome ?? '—'} · {nomeProfessorDaTurma(l.turma) ?? 'Sem professor definido'}
+                          </p>
+                        </div>
+                        <button onClick={() => { setTurmaId(l.turma.id); setAdminTab('chamada'); setFiltroPolo('') }}
+                          className="flex-shrink-0 text-[11px] font-semibold text-primary-600 hover:text-primary-700 border border-primary-200 dark:border-primary-800 hover:bg-primary-50 dark:hover:bg-primary-900/20 px-2.5 py-1.5 rounded-lg transition-colors">
+                          Fazer chamada →
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             )}
 
             {/* Adesão por professor — quem precisa de atenção primeiro, quem já está em dia fica compacto */}
-            <div className="border border-slate-200 dark:border-navy-700 rounded-xl overflow-hidden">
-              <p className="text-xs font-bold text-navy-900 dark:text-white px-4 py-3 border-b border-slate-100 dark:border-navy-700 bg-slate-50 dark:bg-navy-900/40">
-                Adesão por professor
-              </p>
-              {professoresOrdenados.length === 0 ? (
-                <p className="px-4 py-6 text-center text-sm text-slate-400">Nenhuma turma com aula programada nesta semana.</p>
-              ) : (
-                <>
-                  {professoresAtencao.length > 0 && (
-                    <div className="divide-y divide-slate-100 dark:divide-navy-700">
-                      {professoresAtencao.map(p => (
-                        <div key={p.nome} className="px-4 py-3">
-                          <div className="flex items-center justify-between gap-2 mb-1.5">
-                            <span className="text-xs font-semibold text-navy-900 dark:text-white">{p.nome}</span>
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                              p.pct >= 50 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-                              : 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
-                            }`}>{p.feitos}/{p.esperados} · {p.pct}%</span>
+            {supervisaoView === 'adesao' && (
+              <div className="border border-slate-200 dark:border-navy-700 rounded-xl overflow-hidden">
+                {professoresOrdenados.length === 0 ? (
+                  <p className="px-4 py-6 text-center text-sm text-slate-400">Nenhuma turma com aula programada nesta semana.</p>
+                ) : (
+                  <>
+                    {professoresAtencao.length > 0 && (
+                      <div className="divide-y divide-slate-100 dark:divide-navy-700">
+                        {professoresAtencao.map(p => (
+                          <div key={p.nome} className="px-4 py-3.5">
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <span className="text-xs font-semibold text-navy-900 dark:text-white">{p.nome}</span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                p.pct >= 50 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                                : 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
+                              }`}>{p.feitos}/{p.esperados} · {p.pct}%</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {p.turmas.filter(l => l.pendente > 0).map(l => (
+                                <span key={l.turma.id} className="text-[10px] px-2 py-1 rounded-lg flex items-center gap-1 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400">
+                                  <AlertTriangle size={10} />
+                                  {l.turma.modalidades?.nome ?? '—'} · {l.turma.polos?.bairro ?? l.turma.polos?.nome ?? '—'} ({l.pendente} pendente{l.pendente > 1 ? 's' : ''})
+                                </span>
+                              ))}
+                            </div>
                           </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {p.turmas.filter(l => l.pendente > 0).map(l => (
-                              <span key={l.turma.id} className="text-[10px] px-2 py-1 rounded-lg flex items-center gap-1 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400">
-                                <AlertTriangle size={10} />
-                                {l.turma.modalidades?.nome ?? '—'} · {l.turma.polos?.bairro ?? l.turma.polos?.nome ?? '—'} ({l.pendente} pendente{l.pendente > 1 ? 's' : ''})
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {professoresEmDia.length > 0 && (
-                    <details className="border-t border-slate-100 dark:border-navy-700" open={professoresAtencao.length === 0}>
-                      <summary className="px-4 py-2.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 cursor-pointer select-none flex items-center gap-1.5 hover:bg-slate-50 dark:hover:bg-navy-700/30">
-                        <CheckCircle2 size={12} /> {professoresEmDia.length} professor{professoresEmDia.length > 1 ? 'es' : ''} em dia
-                      </summary>
-                      <div className="px-4 pb-3 flex flex-wrap gap-1.5">
-                        {professoresEmDia.map(p => (
-                          <span key={p.nome} className="text-[10px] px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400">
-                            {p.nome} · {p.feitos}/{p.esperados}
-                          </span>
                         ))}
                       </div>
-                    </details>
-                  )}
-                </>
-              )}
-            </div>
-
-            {/* Detalhe por turma — agrupado por polo, colapsável */}
-            <div className="border border-slate-200 dark:border-navy-700 rounded-xl overflow-hidden">
-              <p className="text-xs font-bold text-navy-900 dark:text-white px-4 py-3 border-b border-slate-100 dark:border-navy-700 bg-slate-50 dark:bg-navy-900/40">
-                Detalhe por turma{filtroStatusHoje && <span className="font-normal text-slate-400"> — filtrado</span>}
-              </p>
-              {detalhePorPoloOrdenado.length === 0 ? (
-                <p className="px-4 py-8 text-center text-sm text-slate-400">Nenhuma turma para este filtro.</p>
-              ) : (
-                <div className="divide-y divide-slate-100 dark:divide-navy-700">
-                  {detalhePorPoloOrdenado.map(([poloId, polo]) => {
-                    const temPendencia = polo.linhas.some(l => l.pendente > 0)
-                    const aberto = poloEstaAberto(poloId, temPendencia)
-                    return (
-                      <div key={poloId}>
-                        <button onClick={() => setPoloAberto(p => ({ ...p, [poloId]: !aberto }))}
-                          className="w-full px-4 py-2.5 flex items-center gap-2 bg-slate-50/60 dark:bg-navy-900/30 hover:bg-slate-100 dark:hover:bg-navy-900/50 transition-colors">
-                          <span className="text-xs font-bold text-navy-900 dark:text-white flex-1 text-left">📍 {polo.label}</span>
-                          <span className="text-[10px] text-slate-400">{polo.linhas.length} turma{polo.linhas.length !== 1 ? 's' : ''}</span>
-                          {temPendencia && (
-                            <span className="text-[9px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-1.5 py-0.5 rounded-full font-bold">
-                              {polo.linhas.filter(l => l.pendente > 0).length} pendente{polo.linhas.filter(l => l.pendente > 0).length !== 1 ? 's' : ''}
+                    )}
+                    {professoresEmDia.length > 0 && (
+                      <details className="border-t border-slate-100 dark:border-navy-700" open={professoresAtencao.length === 0}>
+                        <summary className="px-4 py-2.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 cursor-pointer select-none flex items-center gap-1.5 hover:bg-slate-50 dark:hover:bg-navy-700/30">
+                          <CheckCircle2 size={12} /> {professoresEmDia.length} professor{professoresEmDia.length > 1 ? 'es' : ''} em dia
+                        </summary>
+                        <div className="px-4 pb-3 flex flex-wrap gap-1.5">
+                          {professoresEmDia.map(p => (
+                            <span key={p.nome} className="text-[10px] px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400">
+                              {p.nome} · {p.feitos}/{p.esperados}
                             </span>
-                          )}
-                          {aberto ? <ChevronUp size={13} className="text-slate-400" /> : <ChevronDown size={13} className="text-slate-400" />}
-                        </button>
-                        {aberto && (
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-xs">
-                              <thead>
-                                <tr className="bg-slate-50/60 dark:bg-navy-900/20">
-                                  <th className="text-left px-4 py-2 font-semibold text-slate-500 whitespace-nowrap">Turma</th>
-                                  <th className="text-left px-3 py-2 font-semibold text-slate-500 whitespace-nowrap">Professor</th>
-                                  {dias.map(d => (
-                                    <th key={d} className={`px-2 py-2 font-semibold text-center whitespace-nowrap ${d === hoje ? 'text-primary-600' : 'text-slate-500'}`}>{fmtDiaCurto(d)}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-50 dark:divide-navy-700/50">
-                                {polo.linhas.map(l => (
-                                  <tr key={l.turma.id} onClick={() => { setTurmaId(l.turma.id); setAdminTab('chamada'); setFiltroPolo('') }}
-                                    className="cursor-pointer hover:bg-slate-50 dark:hover:bg-navy-700/30 transition-colors">
-                                    <td className="px-4 py-2 font-medium text-navy-900 dark:text-white whitespace-nowrap">{l.turma.modalidades?.nome ?? '—'} · {l.turma.faixa}</td>
-                                    <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{nomeProfessorDaTurma(l.turma) ?? '—'}</td>
-                                    {dias.map(d => {
-                                      const esperado = l.diasEsperados.includes(d)
-                                      const feito = !!chamadasPorTurma[l.turma.id]?.[d]
-                                      return (
-                                        <td key={d} className="px-2 py-2 text-center">
-                                          {!esperado ? <span className="text-slate-200 dark:text-navy-700">—</span>
-                                            : feito ? <CheckCircle2 size={13} className="inline text-emerald-500" />
-                                            : <AlertTriangle size={13} className="inline text-red-400" />}
-                                        </td>
-                                      )
-                                    })}
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Detalhe por polo — grade semanal completa, agrupada e colapsável */}
+            {supervisaoView === 'polo' && (
+              <div className="border border-slate-200 dark:border-navy-700 rounded-xl overflow-hidden">
+                {detalhePorPoloOrdenado.length === 0 ? (
+                  <p className="px-4 py-8 text-center text-sm text-slate-400">Nenhuma turma cadastrada.</p>
+                ) : (
+                  <div className="divide-y divide-slate-100 dark:divide-navy-700">
+                    {detalhePorPoloOrdenado.map(([poloId, polo]) => {
+                      const temPendencia = polo.linhas.some(l => l.pendente > 0)
+                      const aberto = poloEstaAberto(poloId, temPendencia)
+                      return (
+                        <div key={poloId}>
+                          <button onClick={() => setPoloAberto(p => ({ ...p, [poloId]: !aberto }))}
+                            className="w-full px-4 py-2.5 flex items-center gap-2 bg-slate-50/60 dark:bg-navy-900/30 hover:bg-slate-100 dark:hover:bg-navy-900/50 transition-colors">
+                            <span className="text-xs font-bold text-navy-900 dark:text-white flex-1 text-left">📍 {polo.label}</span>
+                            <span className="text-[10px] text-slate-400">{polo.linhas.length} turma{polo.linhas.length !== 1 ? 's' : ''}</span>
+                            {temPendencia && (
+                              <span className="text-[9px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-1.5 py-0.5 rounded-full font-bold">
+                                {polo.linhas.filter(l => l.pendente > 0).length} pendente{polo.linhas.filter(l => l.pendente > 0).length !== 1 ? 's' : ''}
+                              </span>
+                            )}
+                            {aberto ? <ChevronUp size={13} className="text-slate-400" /> : <ChevronDown size={13} className="text-slate-400" />}
+                          </button>
+                          {aberto && (
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="bg-slate-50/60 dark:bg-navy-900/20">
+                                    <th className="text-left px-4 py-2 font-semibold text-slate-500 whitespace-nowrap">Turma</th>
+                                    <th className="text-left px-3 py-2 font-semibold text-slate-500 whitespace-nowrap">Professor</th>
+                                    {dias.map(d => (
+                                      <th key={d} className={`px-2 py-2 font-semibold text-center whitespace-nowrap ${d === hoje ? 'text-primary-600' : 'text-slate-500'}`}>{fmtDiaCurto(d)}</th>
+                                    ))}
                                   </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
+                                </thead>
+                                <tbody className="divide-y divide-slate-50 dark:divide-navy-700/50">
+                                  {polo.linhas.map(l => (
+                                    <tr key={l.turma.id} onClick={() => { setTurmaId(l.turma.id); setAdminTab('chamada'); setFiltroPolo('') }}
+                                      className="cursor-pointer hover:bg-slate-50 dark:hover:bg-navy-700/30 transition-colors">
+                                      <td className="px-4 py-2 font-medium text-navy-900 dark:text-white whitespace-nowrap">{l.turma.modalidades?.nome ?? '—'} · {l.turma.faixa}</td>
+                                      <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{nomeProfessorDaTurma(l.turma) ?? '—'}</td>
+                                      {dias.map(d => {
+                                        const esperado = l.diasEsperados.includes(d)
+                                        const feito = !!chamadasPorTurma[l.turma.id]?.[d]
+                                        return (
+                                          <td key={d} className="px-2 py-2 text-center">
+                                            {!esperado ? <span className="text-slate-200 dark:text-navy-700">—</span>
+                                              : feito ? <CheckCircle2 size={13} className="inline text-emerald-500" />
+                                              : <AlertTriangle size={13} className="inline text-red-400" />}
+                                          </td>
+                                        )
+                                      })}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

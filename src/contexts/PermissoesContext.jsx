@@ -10,7 +10,7 @@ import { useAuth } from '../hooks/useAuth'
 export const TELAS_CONFIGURAVEIS = [
   { tela: 'dashboard',   label: 'Dashboard' },
   { tela: 'polos',       label: 'Polos' },
-  { tela: 'presenca',    label: 'Presença' },
+  { tela: 'presenca',    label: 'Chamada' },
   { tela: 'modalidades', label: 'Modalidades' },
   { tela: 'alunos',      label: 'Alunos' },
   { tela: 'equipes',     label: 'Equipe' },
