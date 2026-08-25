@@ -11,7 +11,9 @@ import EmptyState from '../components/ui/EmptyState'
 import Modal from '../components/ui/Modal'
 import {
   Check, X, Save, Users, Clock, StopCircle, AlertCircle, PlayCircle, AlertTriangle, CheckCircle2,
+  Radar, ChevronDown, ChevronUp,
 } from 'lucide-react'
+import { fmtDiaCurto } from '../lib/semana'
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 function todayIso() { return new Date().toISOString().slice(0, 10) }
@@ -39,8 +41,10 @@ export default function Presenca() {
   const [searchParams] = useSearchParams()
 
   // ── minhas turmas + adesão da semana (escopado por cargo) ───────────────────
+  // Pra admin, "turmas" já vem sem escopo (todas) — os mesmos dados servem
+  // pro seletor de chamada E pra seção de Supervisão abaixo, sem buscar 2x.
   const {
-    loading: minhasLoading, turmas, chamadasPorTurma, hoje,
+    loading: minhasLoading, turmas, linhas, chamadasPorTurma, hoje, dias, segunda,
     pctSemana, totalFeito, totalEsperado, pendencias,
   } = useMinhasChamadasSemana()
 
@@ -48,6 +52,7 @@ export default function Presenca() {
   const [dataSel,    setDataSel]    = useState(todayIso())
   const [turmaId,    setTurmaId]    = useState(searchParams.get('turma') ?? '')
   const [filtroPolo, setFiltroPolo] = useState('')
+  const [supervisaoOpen, setSupervisaoOpen] = useState(true)
 
   // ── chamada ─────────────────────────────────────────────────────────────────
   const [chamada,        setChamada]        = useState(null)
@@ -124,6 +129,26 @@ export default function Presenca() {
     porPolo[poloId].turmas.push(t)
   }
   const polosOrdenados = Object.entries(porPolo).sort(([, a], [, b]) => a.label.localeCompare(b.label, 'pt-BR'))
+
+  // ── Supervisão (só admin) — reaproveita linhas/chamadasPorTurma do hook acima ──
+  const linhasHoje = linhas.map(l => ({
+    ...l,
+    chamadaHoje: chamadasPorTurma[l.turma.id]?.[hoje] ?? null,
+    esperaHoje: l.diasEsperados.includes(hoje),
+  }))
+  const porProfessor = {}
+  for (const l of linhasHoje) {
+    if (l.diasEsperados.length === 0) continue // sem aula programada nesses dias — não entra na cobrança
+    const nomeProf = l.turma.profiles?.nome ?? 'Sem professor'
+    if (!porProfessor[nomeProf]) porProfessor[nomeProf] = { feitos: 0, esperados: 0, turmas: [] }
+    porProfessor[nomeProf].feitos += l.diasFeitos.length
+    porProfessor[nomeProf].esperados += l.diasEsperados.length
+    porProfessor[nomeProf].turmas.push(l)
+  }
+  const professoresOrdenados = Object.entries(porProfessor)
+    .map(([nome, v]) => ({ nome, ...v, pct: v.esperados > 0 ? Math.round(v.feitos / v.esperados * 100) : 100 }))
+    .sort((a, b) => a.pct - b.pct)
+  const pendentesHojeAdmin = linhasHoje.filter(l => l.esperaHoje && !l.chamadaHoje)
 
   // ── effects ──────────────────────────────────────────────────────────────────
 
@@ -321,6 +346,127 @@ export default function Presenca() {
     <div className="flex flex-col flex-1 overflow-hidden">
       <Topbar title="Presença" />
       <div className="flex-1 overflow-y-auto p-3 md:p-5 space-y-4">
+
+        {/* ── Supervisão — só admin: visão de quem fez/não fez chamada ── */}
+        {isAdmin && !minhasLoading && (
+          <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 overflow-hidden">
+            <button onClick={() => setSupervisaoOpen(v => !v)}
+              className="w-full px-4 py-3 flex items-center gap-2 hover:bg-slate-50/60 dark:hover:bg-navy-700/30 transition-colors">
+              <Radar size={15} className="text-primary-500 flex-shrink-0" />
+              <span className="text-sm font-bold text-navy-900 dark:text-white flex-1 text-left">Supervisão — esta semana</span>
+              {pendentesHojeAdmin.length > 0 && (
+                <span className="text-[10px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-2 py-0.5 rounded-full font-bold flex-shrink-0">
+                  ⚠️ {pendentesHojeAdmin.length} sem chamada hoje
+                </span>
+              )}
+              {supervisaoOpen ? <ChevronUp size={15} className="text-slate-400" /> : <ChevronDown size={15} className="text-slate-400" />}
+            </button>
+
+            {supervisaoOpen && (
+              <div className="border-t border-slate-100 dark:border-navy-700 p-4 space-y-4">
+                <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  Semana atual ({fmtDiaCurto(segunda)} — {fmtDiaCurto(hoje)}). Considera só os dias em que cada turma tem aula programada.
+                </p>
+
+                {/* Resumo de hoje */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div className="bg-slate-50 dark:bg-navy-900/40 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1">Turmas com aula hoje</p>
+                    <p className="text-2xl font-extrabold text-navy-900 dark:text-white">{linhasHoje.filter(l => l.esperaHoje).length}</p>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-navy-900/40 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1">Já fizeram chamada</p>
+                    <p className="text-2xl font-extrabold text-emerald-600">{linhasHoje.filter(l => l.esperaHoje && l.chamadaHoje).length}</p>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-navy-900/40 rounded-xl border border-slate-200 dark:border-navy-700 p-4">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1">Ainda não fizeram</p>
+                    <p className="text-2xl font-extrabold text-red-500">{pendentesHojeAdmin.length}</p>
+                  </div>
+                </div>
+
+                {/* Por professor — quem está usando, quem não está */}
+                <div className="border border-slate-200 dark:border-navy-700 rounded-xl overflow-hidden">
+                  <p className="text-xs font-bold text-navy-900 dark:text-white px-4 py-3 border-b border-slate-100 dark:border-navy-700 bg-slate-50 dark:bg-navy-900/40">
+                    Adesão por professor
+                  </p>
+                  <div className="divide-y divide-slate-100 dark:divide-navy-700">
+                    {professoresOrdenados.map(p => (
+                      <div key={p.nome} className="px-4 py-3">
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <span className="text-xs font-semibold text-navy-900 dark:text-white">{p.nome}</span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            p.pct === 100 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                            : p.pct >= 50 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                            : 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
+                          }`}>{p.feitos}/{p.esperados} · {p.pct}%</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {p.turmas.map(l => (
+                            <span key={l.turma.id} className={`text-[10px] px-2 py-1 rounded-lg flex items-center gap-1 ${
+                              l.pendente === 0 ? 'bg-slate-50 dark:bg-navy-900/40 text-slate-500 dark:text-slate-400'
+                              : 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
+                            }`}>
+                              {l.pendente === 0 ? <CheckCircle2 size={10} /> : <AlertTriangle size={10} />}
+                              {l.turma.modalidades?.nome ?? '—'} · {l.turma.polos?.bairro ?? l.turma.polos?.nome ?? '—'}
+                              {l.pendente > 0 && ` (${l.pendente} pendente${l.pendente > 1 ? 's' : ''})`}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    {professoresOrdenados.length === 0 && (
+                      <p className="px-4 py-6 text-center text-sm text-slate-400">Nenhuma turma com aula programada nesta semana.</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Detalhe por turma */}
+                <div className="border border-slate-200 dark:border-navy-700 rounded-xl overflow-hidden">
+                  <p className="text-xs font-bold text-navy-900 dark:text-white px-4 py-3 border-b border-slate-100 dark:border-navy-700 bg-slate-50 dark:bg-navy-900/40">
+                    Detalhe por turma
+                  </p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-slate-50 dark:bg-navy-900/40">
+                          <th className="text-left px-4 py-2 font-semibold text-slate-500 whitespace-nowrap">Turma</th>
+                          <th className="text-left px-3 py-2 font-semibold text-slate-500 whitespace-nowrap">Polo</th>
+                          <th className="text-left px-3 py-2 font-semibold text-slate-500 whitespace-nowrap">Professor</th>
+                          {dias.map(d => (
+                            <th key={d} className={`px-2 py-2 font-semibold text-center whitespace-nowrap ${d === hoje ? 'text-primary-600' : 'text-slate-500'}`}>{fmtDiaCurto(d)}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-navy-700">
+                        {linhasHoje.map(l => (
+                          <tr key={l.turma.id}>
+                            <td className="px-4 py-2 font-medium text-navy-900 dark:text-white whitespace-nowrap">{l.turma.modalidades?.nome ?? '—'} · {l.turma.faixa}</td>
+                            <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{l.turma.polos?.bairro ?? l.turma.polos?.nome ?? '—'}</td>
+                            <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{l.turma.profiles?.nome ?? '—'}</td>
+                            {dias.map(d => {
+                              const esperado = l.diasEsperados.includes(d)
+                              const feito = !!chamadasPorTurma[l.turma.id]?.[d]
+                              return (
+                                <td key={d} className="px-2 py-2 text-center">
+                                  {!esperado ? <span className="text-slate-200 dark:text-navy-700">—</span>
+                                    : feito ? <CheckCircle2 size={13} className="inline text-emerald-500" />
+                                    : <AlertTriangle size={13} className="inline text-red-400" />}
+                                </td>
+                              )
+                            })}
+                          </tr>
+                        ))}
+                        {linhasHoje.length === 0 && (
+                          <tr><td colSpan={3 + dias.length} className="px-4 py-8 text-center text-slate-400">Nenhuma turma cadastrada.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Resumo pessoal da semana — professor, estagiário e coordenador ── */}
         {!isAdmin && !minhasLoading && turmas.length > 0 && (

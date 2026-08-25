@@ -4,9 +4,10 @@ import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../contexts/ThemeContext'
 import { useSidebar } from '../contexts/SidebarContext'
 import { usePermissoesTela } from '../contexts/PermissoesContext'
+import { APP_VERSION } from '../lib/version'
 import {
-  LayoutDashboard, MapPin, Trophy, Users, Radar,
-  UserCheck, BarChart2, Key, Settings, LogOut, Sun, Moon, X, History, ClipboardList
+  LayoutDashboard, MapPin, Trophy, Users,
+  UserCheck, BarChart2, Settings, LogOut, Sun, Moon, X, History, ClipboardList
 } from 'lucide-react'
 
 const NAV = [
@@ -30,10 +31,8 @@ const NAV = [
     label: 'Admin',
     items: [
       { to: '/relatorios', icon: BarChart2, label: 'Relatórios', minRole: 'professor', tela: 'relatorios' },
-      // Telas exclusivas de admin — nunca controladas pela matriz de permissões,
+      // Tela exclusiva de admin — nunca controlada pela matriz de permissões,
       // pra o admin nunca correr risco de se trancar fora do próprio sistema.
-      { to: '/supervisao', icon: Radar, label: 'Supervisão', minRole: 'admin' },
-      { to: '/gerenciar-acesso', icon: Key, label: 'Acessos', minRole: 'admin' },
       { to: '/historico', icon: History, label: 'Histórico', minRole: 'admin' },
       { to: '/configuracoes', icon: Settings, label: 'Configurações', minRole: 'estagiario' },
     ]
@@ -135,6 +134,7 @@ export default function Sidebar() {
             <LogOut size={13} />
           </button>
         </div>
+        <p className="text-center text-[9px] text-slate-300 dark:text-slate-600">SMEL Conecta · {APP_VERSION}</p>
       </div>
     </aside>
   )

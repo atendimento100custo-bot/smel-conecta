@@ -7,6 +7,7 @@ import Topbar from '../components/Topbar'
 import Button from '../components/ui/Button'
 import PermissoesAcessoTab from './PermissoesAcesso'
 import InfraTab from './Infra'
+import { APP_VERSION } from '../lib/version'
 
 function TabBtn({ active, onClick, children }) {
   return (
@@ -58,7 +59,7 @@ function GeralTab({ profile }) {
 
   const INFO = [
     ['Sistema', 'SMEL Conecta'],
-    ['Versão', '1.0.0'],
+    ['Versão', APP_VERSION],
     ['Prefeitura', 'Volta Redonda / RJ'],
     ['Secretaria', 'SMEL — Secretaria Municipal de Esportes e Lazer'],
     ['Usuário logado', profile?.nome ?? '—'],

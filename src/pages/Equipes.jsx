@@ -2,7 +2,7 @@
 import { useState, useMemo } from 'react'
 import { useSupabaseData } from '../hooks/useSupabaseData'
 import { supabase } from '../lib/supabase'
-import { criarFuncionario, atualizarEmailFuncionario, excluirFuncionario } from '../lib/adminUsers'
+import { criarFuncionario, atualizarEmailFuncionario, excluirFuncionario, resetarSenhaFuncionario } from '../lib/adminUsers'
 import { useAuth } from '../hooks/useAuth'
 import { logAcao } from '../lib/auditLog'
 import Topbar from '../components/Topbar'
@@ -11,7 +11,7 @@ import Badge from '../components/ui/Badge'
 import Modal from '../components/ui/Modal'
 import EmptyState from '../components/ui/EmptyState'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
-import { X, Phone, MapPin, BookOpen, Pencil, Trash2, UserPlus, Filter, Check, Plus } from 'lucide-react'
+import { X, Phone, MapPin, BookOpen, Pencil, Trash2, UserPlus, Filter, Check, Plus, KeyRound, Search, Copy, UserX, UserCheck as UserCheckIcon } from 'lucide-react'
 
 const poloLabel = (p) => [p.tipo, p.bairro].filter(Boolean).join(' ') || p.nome || ''
 
@@ -58,12 +58,19 @@ export default function Equipes() {
 
   const [filtroCargoEq, setFiltroCargoEq] = useState('')
   const [filtroPoloEq, setFiltroPoloEq] = useState('')
+  const [buscaEq, setBuscaEq] = useState('')
+  const [mostrarInativos, setMostrarInativos] = useState(false)
   const [selectedMembro, setSelectedMembro] = useState(null)
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
   const [deletando, setDeletando] = useState(null)
   const [saving, setSaving] = useState(false)
+
+  // Acessos: redefinir senha / ativar-desativar conta
+  const [resettingSenha, setResettingSenha] = useState(false)
+  const [senhaGerada, setSenhaGerada] = useState('')
+  const [togglingAtivo, setTogglingAtivo] = useState(false)
 
   // Novo funcionário
   const [createOpen, setCreateOpen] = useState(false)
@@ -74,7 +81,14 @@ export default function Equipes() {
 
   const loading = loadingMembros || loadingTurmas || loadingPolos
 
-  const ativos = useMemo(() => membros.filter(m => m.ativo !== false), [membros])
+  // "ativos" = membros visíveis na listagem. Por padrão só contas ativas;
+  // admin pode marcar "mostrar inativos" pra achar/reativar uma conta desligada.
+  const ativos = useMemo(() => {
+    let lista = mostrarInativos ? membros : membros.filter(m => m.ativo !== false)
+    const busca = buscaEq.trim().toLowerCase()
+    if (busca) lista = lista.filter(m => m.nome?.toLowerCase().includes(busca) || m.email?.toLowerCase().includes(busca))
+    return lista
+  }, [membros, mostrarInativos, buscaEq])
 
   const lideranca = useMemo(
     () => ativos.filter(m => m.cargo === 'admin' || m.cargo === 'eduardo'),
@@ -246,13 +260,35 @@ export default function Equipes() {
     reload()
   }
 
+  async function handleResetSenha(membro) {
+    setResettingSenha(true)
+    const { data, error } = await resetarSenhaFuncionario(membro.id)
+    setResettingSenha(false)
+    if (error) { console.warn('[resetarSenhaFuncionario]', error); return }
+    setSenhaGerada(data?.senhaGerada ?? '')
+  }
+
+  async function handleToggleAtivo(membro) {
+    setTogglingAtivo(true)
+    const novoAtivo = membro.ativo === false
+    await supabase.from('profiles').update({ ativo: novoAtivo }).eq('id', membro.id)
+    setTogglingAtivo(false)
+    setSelectedMembro(prev => (prev?.id === membro.id ? { ...prev, ativo: novoAtivo } : prev))
+    reload()
+  }
+
+  function selecionarMembro(m) {
+    setSenhaGerada('')
+    setSelectedMembro(m)
+  }
+
   function MemberCard({ m }) {
     const minhasTurmas = turmasDeMembro(m.id)
     return (
       <div
         key={m.id}
-        onClick={() => setSelectedMembro(m)}
-        className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 p-3 flex items-center gap-3 cursor-pointer hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm transition-all group"
+        onClick={() => selecionarMembro(m)}
+        className={`bg-white dark:bg-navy-800 rounded-xl border p-3 flex items-center gap-3 cursor-pointer hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm transition-all group ${m.ativo === false ? 'border-slate-200 dark:border-navy-700 opacity-60' : 'border-slate-200 dark:border-navy-700'}`}
       >
         <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary-600 to-primary-400 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
           {getInitials(m.nome)}
@@ -261,6 +297,7 @@ export default function Equipes() {
           <div className="flex items-center gap-2 mb-0.5 flex-wrap">
             <p className="text-xs font-bold text-navy-900 dark:text-white">{m.nome}</p>
             <Badge color={CARGO_COLORS[m.cargo] ?? 'gray'}>{CARGO_LABELS[m.cargo] ?? m.cargo}</Badge>
+            {m.ativo === false && <Badge color="gray">Inativo</Badge>}
           </div>
           <div className="flex gap-3 flex-wrap">
             {m.telefone && (
@@ -308,6 +345,11 @@ export default function Equipes() {
         {/* Filtros */}
         <div className="flex flex-wrap gap-2 mb-4">
           <div className="flex items-center gap-1.5 bg-white dark:bg-navy-800 border border-slate-200 dark:border-navy-700 rounded-lg px-2 py-1.5">
+            <Search size={11} className="text-slate-400" />
+            <input value={buscaEq} onChange={e => setBuscaEq(e.target.value)} placeholder="Buscar nome ou e-mail…"
+              className="text-xs bg-transparent text-navy-900 dark:text-white focus:outline-none placeholder:text-slate-400 w-36" />
+          </div>
+          <div className="flex items-center gap-1.5 bg-white dark:bg-navy-800 border border-slate-200 dark:border-navy-700 rounded-lg px-2 py-1.5">
             <Filter size={11} className="text-slate-400" />
             <select value={filtroCargoEq} onChange={e => setFiltroCargoEq(e.target.value)}
               className="text-xs bg-transparent text-navy-900 dark:text-white focus:outline-none">
@@ -325,8 +367,14 @@ export default function Equipes() {
               {polos.map(p => <option key={p.id} value={p.id}>{poloLabel(p)}</option>)}
             </select>
           </div>
-          {(filtroCargoEq || filtroPoloEq) && (
-            <button onClick={() => { setFiltroCargoEq(''); setFiltroPoloEq('') }}
+          {isAdmin && (
+            <label className="flex items-center gap-1.5 bg-white dark:bg-navy-800 border border-slate-200 dark:border-navy-700 rounded-lg px-2 py-1.5 text-xs text-slate-500 dark:text-slate-400 cursor-pointer select-none">
+              <input type="checkbox" checked={mostrarInativos} onChange={e => setMostrarInativos(e.target.checked)} className="accent-primary-600" />
+              Mostrar inativos
+            </label>
+          )}
+          {(filtroCargoEq || filtroPoloEq || buscaEq || mostrarInativos) && (
+            <button onClick={() => { setFiltroCargoEq(''); setFiltroPoloEq(''); setBuscaEq(''); setMostrarInativos(false) }}
               className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 flex items-center gap-1">
               <X size={11}/> Limpar filtros
             </button>
@@ -433,16 +481,46 @@ export default function Equipes() {
               })()}
             </div>
 
+            {/* Acessos — só admin: nova senha gerada aparece aqui uma vez */}
+            {isAdmin && senhaGerada && (
+              <div className="px-4 pb-2">
+                <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-lg px-3 py-2 text-[11px] text-emerald-700 dark:text-emerald-400 space-y-1">
+                  <p>✓ Senha redefinida — envie ao usuário, ela só aparece aqui uma vez:</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <code className="font-mono font-bold text-navy-900 dark:text-white">{senhaGerada}</code>
+                    <button onClick={() => navigator.clipboard.writeText(senhaGerada)} className="flex items-center gap-1 text-emerald-700 dark:text-emerald-400 hover:underline flex-shrink-0">
+                      <Copy size={11}/> copiar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Footer actions */}
             {canEdit && (
-              <div className="px-4 py-3 border-t border-slate-200 dark:border-navy-700 flex gap-2">
-                <Button size="sm" className="flex-1" onClick={() => openEdit(selectedMembro)}>
-                  <Pencil size={12}/> Editar
-                </Button>
-                {isAdmin && (
-                  <Button size="sm" variant="secondary" onClick={() => setDeletando(selectedMembro)}>
-                    <Trash2 size={12}/>
+              <div className="px-4 py-3 border-t border-slate-200 dark:border-navy-700 space-y-2">
+                <div className="flex gap-2">
+                  <Button size="sm" className="flex-1" onClick={() => openEdit(selectedMembro)}>
+                    <Pencil size={12}/> Editar
                   </Button>
+                  {isAdmin && (
+                    <>
+                      <Button size="sm" variant="secondary" onClick={() => handleResetSenha(selectedMembro)} disabled={resettingSenha} title="Redefinir senha">
+                        <KeyRound size={12}/>
+                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => setDeletando(selectedMembro)} title="Excluir">
+                        <Trash2 size={12}/>
+                      </Button>
+                    </>
+                  )}
+                </div>
+                {isAdmin && (
+                  <button onClick={() => handleToggleAtivo(selectedMembro)} disabled={togglingAtivo}
+                    className="w-full text-[11px] text-slate-500 dark:text-slate-400 hover:text-navy-900 dark:hover:text-white py-1 flex items-center justify-center gap-1.5 disabled:opacity-50">
+                    {selectedMembro.ativo === false
+                      ? <><UserCheckIcon size={12}/> Reativar conta</>
+                      : <><UserX size={12}/> Desativar conta</>}
+                  </button>
                 )}
               </div>
             )}
