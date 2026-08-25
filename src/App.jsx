@@ -42,7 +42,7 @@ export default function App() {
         <Route path="atestados" element={<R minRole="professor"><Atestados /></R>} />
         <Route path="melhor-idade" element={<R minRole="professor"><MelhorIdade /></R>} />
         <Route path="viagens" element={<R minRole="coordenador"><Viagens /></R>} />
-        <Route path="relatorios" element={<R minRole="professor" tela="relatorios"><Relatorios /></R>} />
+        <Route path="relatorios" element={<R minRole="admin" tela="relatorios"><Relatorios /></R>} />
         <Route path="historico" element={<R minRole="admin" ownerOnly><Historico /></R>} />
         <Route path="configuracoes" element={<Configuracoes />} />
         <Route path="*" element={<Navigate to="/" replace />} />

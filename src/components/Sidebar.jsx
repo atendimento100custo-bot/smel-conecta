@@ -30,7 +30,7 @@ const NAV = [
   {
     label: 'Admin',
     items: [
-      { to: '/relatorios', icon: BarChart2, label: 'Relatórios', minRole: 'professor', tela: 'relatorios' },
+      { to: '/relatorios', icon: BarChart2, label: 'Relatórios', minRole: 'admin', tela: 'relatorios' },
       // Exclusiva do DONO do sistema (uma conta específica, marcada no banco) —
       // não de qualquer conta com cargo admin. Nunca controlada pela matriz de
       // permissões, pro dono nunca correr risco de se trancar fora do sistema.
