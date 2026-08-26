@@ -2,7 +2,7 @@
 import { logAcao } from '../lib/auditLog'
 import { useMemo, useState, useEffect, useCallback } from 'react'
 import { useToast } from '../components/ui/Toast'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useSupabaseData } from '../hooks/useSupabaseData'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../contexts/ThemeContext'
@@ -589,6 +589,7 @@ function CriterioIcon({ ok }) {
 export default function PoloDetalhe() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { dark } = useTheme()
   const { isAdmin, isCoordenador, isProfessor, isEstagiario, profile } = useAuth()
   const { offline, pending, addToQueue } = useOfflineQueue()
@@ -885,6 +886,16 @@ export default function PoloDetalhe() {
       navigate('/polos')
     }
   }, [temAcesso, polos, profile, loadingAtribuicoes, loadingTurmas])
+
+  // Atalho vindo do Dashboard ("Minhas turmas hoje" → ?turma=X): abre a aula
+  // direto, sem precisar caçar o card manualmente na lista de hoje.
+  useEffect(() => {
+    const turmaParam = searchParams.get('turma')
+    if (!turmaParam || loadingTurmas) return
+    const alvo = turmasPolo.find(t => t.id === turmaParam)
+    if (alvo) setAulaOpen(alvo)
+    setSearchParams(prev => { const p = new URLSearchParams(prev); p.delete('turma'); return p }, { replace: true })
+  }, [searchParams, loadingTurmas, turmasPolo])
 
   // Auto-inativação por atestado desativada durante período de cadastro inicial.
   // Os alertas visuais de atestado vencido/vencendo continuam ativos no card de KPIs.

@@ -4,13 +4,14 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 
 // Telas "operacionais" que o admin pode liberar/ocultar por cargo.
-// Telas exclusivas de admin (Acessos, Histórico, Infra, Supervisão, esta própria
-// tela de permissões) ficam sempre travadas no código — nunca entram aqui,
-// pra o admin nunca correr risco de se trancar fora do próprio sistema.
+// Telas exclusivas de admin (Acessos, Histórico, Infra, Frequência/Supervisão,
+// esta própria tela de permissões) ficam sempre travadas no código — nunca
+// entram aqui, pra o admin nunca correr risco de se trancar fora do sistema.
+// Frequência (chamada + supervisão) saiu daqui: estagiário/professor/
+// coordenador fazem chamada em Polos > (polo deles) > aula, sem toggle.
 export const TELAS_CONFIGURAVEIS = [
   { tela: 'dashboard',   label: 'Dashboard' },
   { tela: 'polos',       label: 'Polos' },
-  { tela: 'presenca',    label: 'Chamada' },
   { tela: 'modalidades', label: 'Modalidades' },
   { tela: 'alunos',      label: 'Alunos' },
   { tela: 'equipes',     label: 'Equipe' },
@@ -25,7 +26,6 @@ export const CARGOS_CONFIGURAVEIS = ['estagiario', 'professor', 'coordenador']
 export const DEFAULTS = {
   dashboard:   { estagiario: true,  professor: true,  coordenador: true },
   polos:       { estagiario: true,  professor: true,  coordenador: true },
-  presenca:    { estagiario: true,  professor: true,  coordenador: true },
   modalidades: { estagiario: false, professor: false, coordenador: true },
   alunos:      { estagiario: false, professor: true,  coordenador: true },
   equipes:     { estagiario: false, professor: false, coordenador: true },

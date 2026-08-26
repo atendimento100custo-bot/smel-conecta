@@ -63,7 +63,7 @@ export default function DashboardStaff() {
                   {turmasHoje.map(l => {
                     const feita = !!chamadasPorTurma[l.turma.id]?.[hoje]
                     return (
-                      <button key={l.turma.id} onClick={() => navigate(`/presenca?turma=${l.turma.id}`)}
+                      <button key={l.turma.id} onClick={() => navigate(`/polos/${l.turma.polos?.id ?? l.turma.polo_id}?turma=${l.turma.id}`)}
                         className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 dark:hover:bg-navy-700/40 transition-colors text-left">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-navy-900 dark:text-white truncate">

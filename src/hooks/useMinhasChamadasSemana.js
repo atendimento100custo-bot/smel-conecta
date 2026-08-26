@@ -14,6 +14,7 @@ export function useMinhasChamadasSemana() {
     'turmas', '*, modalidades(nome,emoji), polos(id,nome,bairro,tipo), profiles(nome)'
   )
   const [myTurmaIds, setMyTurmaIds] = useState(null)
+  const [myPoloIds,  setMyPoloIds]  = useState(null) // usado só por coordenador (escopo por polo, não turma a turma)
   const [chamadas, setChamadas] = useState([])
   const [loadingChamadas, setLoadingChamadas] = useState(true)
 
@@ -23,7 +24,15 @@ export function useMinhasChamadasSemana() {
 
   useEffect(() => {
     if (!profile) return
-    if (isAdmin || isCoordenador) { setMyTurmaIds(null); return }
+    if (isAdmin) { setMyTurmaIds(null); setMyPoloIds(null); return }
+    // Coordenador enxerga o polo inteiro que coordena, não só as turmas em que
+    // aparece como professor — mas nunca outros polos (mesmo escopo do PoloDetalhe).
+    if (isCoordenador) {
+      supabase.from('atribuicoes').select('polo_id').eq('usuario_id', profile.id)
+        .not('polo_id', 'is', null)
+        .then(({ data }) => setMyPoloIds([...new Set((data ?? []).map(a => a.polo_id))]))
+      return
+    }
     supabase.from('atribuicoes').select('turma_id').eq('usuario_id', profile.id)
       .not('turma_id', 'is', null)
       .then(({ data }) => setMyTurmaIds((data ?? []).map(a => a.turma_id)))
@@ -31,7 +40,12 @@ export function useMinhasChamadasSemana() {
 
   const turmas = (() => {
     if (!profile || turmasLoading) return []
-    if (isAdmin || isCoordenador) return allTurmas.filter(t => t.status !== 'Inativa')
+    if (isAdmin) return allTurmas.filter(t => t.status !== 'Inativa')
+    if (isCoordenador) {
+      if (myPoloIds === null) return []
+      const polos = new Set(myPoloIds)
+      return allTurmas.filter(t => t.status !== 'Inativa' && polos.has(t.polos?.id ?? t.polo_id))
+    }
     if (myTurmaIds === null) return []
     const ids = new Set(myTurmaIds ?? [])
     return allTurmas.filter(t => t.status !== 'Inativa' && (ids.has(t.id) || (isProfessor && t.professor_id === profile.id)))

@@ -383,7 +383,7 @@ export default function Presenca() {
   // ─────────────────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
-      <Topbar title={isAdmin ? 'Frequência' : 'Chamada'} />
+      <Topbar title="Frequência" />
       <div className="flex-1 overflow-y-auto p-3 md:p-5 space-y-4">
 
         {/* ── Sub-abas — só admin: Supervisão (visão geral) vs Chamada (fazer a chamada) ── */}

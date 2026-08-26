@@ -37,7 +37,9 @@ export default function App() {
         <Route path="turmas" element={<R minRole="professor"><Turmas /></R>} />
         <Route path="alunos" element={<R minRole="professor" tela="alunos"><Alunos /></R>} />
         <Route path="alunos/:id" element={<R minRole="professor" tela="alunos"><AlunoDetalhe /></R>} />
-        <Route path="presenca" element={<R minRole="estagiario" tela="presenca"><Presenca /></R>} />
+        {/* Frequência (Supervisão + Chamada) — exclusiva de admin. Estagiário/
+            professor/coordenador fazem chamada em Polos > (polo deles) > aula. */}
+        <Route path="presenca" element={<R minRole="admin"><Presenca /></R>} />
         <Route path="registro-aula" element={<R minRole="professor"><RegistroAula /></R>} />
         <Route path="atestados" element={<R minRole="professor"><Atestados /></R>} />
         <Route path="melhor-idade" element={<R minRole="professor"><MelhorIdade /></R>} />
