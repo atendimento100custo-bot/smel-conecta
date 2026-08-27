@@ -298,10 +298,31 @@ export default function Presenca() {
     }
   }
 
-  function toggle(alunoId, value) {
+  // Salva no banco assim que o aluno é tocado — não espera o "Salvar Presença"
+  // no fim. Resolve perder a chamada inteira se o celular travar/desligar no
+  // meio (cada toque já fica gravado no instante em que acontece).
+  async function toggle(alunoId, value) {
     setPresencaState(prev => ({ ...prev, [alunoId]: value }))
     if (value === 'justificado') { setMotivoAberto(alunoId) }
     else { setMotivoAberto(null); setMotivoState(prev => ({ ...prev, [alunoId]: '' })) }
+
+    if (!turmaId || !dataSel) return
+    let chamadaAtual = chamada
+    if (!chamadaAtual) {
+      const { data: nova, error: errChamada } = await supabase.from('chamadas')
+        .insert({ turma_id: turmaId, data: dataSel, iniciada_por: profile.id }).select('*').single()
+      if (!errChamada && nova) { chamadaAtual = nova; setChamada(nova) }
+      else if (errChamada?.code === '23505') {
+        const { data: ex } = await supabase.from('chamadas').select('*').eq('turma_id', turmaId).eq('data', dataSel).single()
+        if (ex) { chamadaAtual = ex; setChamada(ex) }
+      }
+    }
+    const { error } = await supabase.from('presencas').upsert({
+      turma_id: turmaId, aluno_id: alunoId, data: dataSel, status: value,
+      motivo: value === 'justificado' ? (motivoState[alunoId] ?? null) : null,
+      registrado_por: profile.id,
+    }, { onConflict: 'turma_id,aluno_id,data' })
+    if (error) setSaveMsg({ type: 'error', text: 'Não deu pra salvar esse aluno agora. Confira sua internet e toque nele de novo.' })
   }
 
   async function encerrarChamada() {
@@ -775,6 +796,10 @@ export default function Presenca() {
                           {motivoAberto === aluno.id && editavel && (
                             <input type="text" value={motivoState[aluno.id] ?? ''}
                               onChange={e => setMotivoState(p => ({ ...p, [aluno.id]: e.target.value }))}
+                              onBlur={e => supabase.from('presencas')
+                                .upsert({ turma_id: turmaId, aluno_id: aluno.id, data: dataSel, status: 'justificado',
+                                          motivo: e.target.value || null, registrado_por: profile.id },
+                                        { onConflict: 'turma_id,aluno_id,data' })}
                               placeholder="Motivo (ex: atestado médico)…"
                               className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-amber-300 bg-amber-50 focus:outline-none focus:ring-1 focus:ring-amber-400 text-amber-900"/>
                           )}

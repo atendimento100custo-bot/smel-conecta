@@ -82,9 +82,10 @@ function TabBtn({ active, onClick, children }) {
 }
 
 // ─── Aula Modal (presença + registro) ────────────────────────────────────────
-function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved, adminMode = false }) {
+function AulaModal({ turma, alunos, presencas, registros, justificativas = [], open, onClose, onSaved, adminMode = false }) {
   const { profile } = useAuth()
   const [presencaMap, setPresencaMap] = useState({})
+  const [motivoMap,   setMotivoMap]   = useState({})
   const [registro, setRegistro] = useState({ conteudo: '', ocorrencias: '' })
   const [fotos, setFotos] = useState([])
   const [uploadingFoto, setUploadingFoto] = useState(false)
@@ -93,6 +94,11 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
   const [saveMsg, setSaveMsg] = useState(null)   // { tipo: 'sucesso'|'erro', texto: string }
   const [buscaPresenca, setBuscaPresenca] = useState('')
   const { showToast: showAulaToast, toastEl: aulaToastEl } = useToast()
+
+  // Justificar período (vale pra todas as turmas do aluno, igual na Presença)
+  const [justModalAluno, setJustModalAluno] = useState(null)
+  const [justForm,       setJustForm]       = useState({ data_inicio: '', data_fim: '', motivo: '' })
+  const [savingJust,     setSavingJust]     = useState(false)
 
   // Chamada — controla se a aula foi iniciada (libera lista de presença)
   const [chamada, setChamada] = useState(null)      // null = não existe | objeto = criada
@@ -150,14 +156,19 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
 
   useEffect(() => {
     if (!turma || !open) return
-    // Init presença (use existing if any, else default all absent)
+    // Init presença (use existing if any; senão, aluno com justificativa de
+    // período cadastrada pra hoje já nasce "Justificada"; senão, falta)
     const existentes = presencas.filter(p => p.turma_id === turma.id && p.data === dataHoje)
-    const map = {}
+    const map = {}, motivos = {}
     alunosTurma.forEach(a => {
       const ex = existentes.find(p => p.aluno_id === a.id)
-      map[a.id] = ex ? ex.status : false
+      if (ex) { map[a.id] = ex.status; if (ex.motivo) motivos[a.id] = ex.motivo; return }
+      const justif = justificativas.find(j => j.aluno_id === a.id && j.data_inicio <= dataHoje && j.data_fim >= dataHoje)
+      if (justif) { map[a.id] = 'justificado'; motivos[a.id] = `📅 Ausência avisada: ${justif.motivo}` }
+      else map[a.id] = false
     })
     setPresencaMap(map)
+    setMotivoMap(motivos)
 
     // Init registro
     const reg = registros.find(r => r.turma_id === turma.id && r.data === dataHoje)
@@ -187,6 +198,59 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
       if (ex) setChamada(ex)
     }
     setIniciando(false)
+  }
+
+  // Salva a presença de UM aluno na hora, assim que ele é tocado — não espera
+  // o botão "Registrar Aula" no fim. Resolve o caso de bloquear/fechar o
+  // celular no meio da chamada e perder tudo que já tinha sido marcado: cada
+  // toque já está gravado no banco no instante em que acontece.
+  async function marcarPresenca(alunoId, novoValor, motivo = null) {
+    setPresencaMap(m => ({ ...m, [alunoId]: novoValor })) // resposta imediata na tela
+    if (motivo !== null) setMotivoMap(m => ({ ...m, [alunoId]: motivo }))
+    const status = novoValor === 'presente' || novoValor === true ? 'presente'
+                  : novoValor === 'justificado' ? 'justificado' : 'falta'
+    const { error } = await supabase.from('presencas').upsert({
+      turma_id: turma.id, aluno_id: alunoId, data: dataHoje, status,
+      motivo: status === 'justificado' ? (motivo ?? motivoMap[alunoId] ?? null) : null,
+      registrado_por: profile?.id ?? null,
+    }, { onConflict: 'turma_id,aluno_id,data' })
+    if (error) showAulaToast('⚠️ Não deu pra salvar esse aluno agora — confira sua internet e toque nele de novo.', 'error')
+  }
+
+  async function marcarTodos(alunosAlvo, novoValor) {
+    setPresencaMap(m => { const n = { ...m }; alunosAlvo.forEach(a => { n[a.id] = novoValor }); return n })
+    const status = novoValor === 'presente' ? 'presente' : 'falta'
+    const { error } = await supabase.from('presencas')
+      .upsert(alunosAlvo.map(a => ({
+        turma_id: turma.id, aluno_id: a.id, data: dataHoje, status,
+        motivo: null, registrado_por: profile?.id ?? null,
+      })), { onConflict: 'turma_id,aluno_id,data' })
+    if (error) showAulaToast('⚠️ Não deu pra salvar a lista inteira — confira sua internet e tente de novo.', 'error')
+  }
+
+  function abrirJustificar(aluno) {
+    setJustForm({ data_inicio: dataHoje, data_fim: dataHoje, motivo: '' })
+    setJustModalAluno(aluno)
+  }
+
+  async function salvarJustificativa() {
+    if (!justModalAluno || !justForm.data_inicio || !justForm.data_fim || !justForm.motivo.trim()) return
+    setSavingJust(true)
+    const { error } = await supabase.from('justificativas_ausencia').insert({
+      aluno_id: justModalAluno.id,
+      data_inicio: justForm.data_inicio,
+      data_fim: justForm.data_fim,
+      motivo: justForm.motivo.trim(),
+      criado_por: profile?.id ?? null,
+    })
+    setSavingJust(false)
+    if (error) { showAulaToast('⚠️ Não foi possível salvar a justificativa. Tente de novo.', 'error'); return }
+    // Se hoje cai dentro do período justificado, já reflete na chamada aberta.
+    if (justForm.data_inicio <= dataHoje && justForm.data_fim >= dataHoje) {
+      await marcarPresenca(justModalAluno.id, 'justificado', `📅 Ausência avisada: ${justForm.motivo.trim()}`)
+    }
+    setJustModalAluno(null)
+    onSaved?.()
   }
 
   async function salvarPresenca() {
@@ -463,9 +527,9 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
                   onChange={e => setBuscaPresenca(e.target.value)}
                   className="flex-1 min-w-32 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-navy-600 bg-white dark:bg-navy-700 focus:outline-none focus:ring-1 focus:ring-primary-500"
                 />
-                <button onClick={() => setPresencaMap(m => Object.fromEntries(Object.keys(m).map(k => [k, 'presente'])))}
+                <button onClick={() => marcarTodos(alunosTurma.filter(a => a.status === 'Ativo'), 'presente')}
                   className="text-[10px] font-semibold text-primary-600 hover:text-primary-700 px-2 py-0.5 rounded border border-primary-200 dark:border-primary-700">Todos</button>
-                <button onClick={() => setPresencaMap(m => Object.fromEntries(Object.keys(m).map(k => [k, false])))}
+                <button onClick={() => marcarTodos(alunosTurma.filter(a => a.status === 'Ativo'), false)}
                   className="text-[10px] font-semibold text-red-500 hover:text-red-600 px-2 py-0.5 rounded border border-red-200 dark:border-red-800">Nenhum</button>
               </div>
 
@@ -502,36 +566,46 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
                     // Ciclo 3 estados: falta → presente → justificado → falta
                     const nextVal = isJustificado ? false : isPresente ? 'justificado' : 'presente'
                     return (
-                      <button
-                        key={a.id}
-                        disabled={isLocked}
-                        onClick={() => setPresencaMap(m => ({ ...m, [a.id]: nextVal }))}
-                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                      <div key={a.id} className={`w-full flex items-center gap-1.5 px-2 py-1 rounded-lg transition-colors ${
                           isJustificado
                             ? 'bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-700'
                             : isPresente
                             ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-700'
                             : 'bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800'
-                        }`}
-                      >
-                        {isJustificado
-                          ? <CheckCircle2 size={16} className="text-amber-500 flex-shrink-0" />
-                          : isPresente
-                          ? <CheckCircle2 size={16} className="text-primary-600 flex-shrink-0" />
-                          : <Circle size={16} className="text-red-400 flex-shrink-0" />}
-                        <div className="w-6 h-6 rounded-full bg-primary-600 flex items-center justify-center flex-shrink-0">
-                          <span className="text-white text-[9px] font-bold">{a.nome?.charAt(0)}</span>
-                        </div>
-                        <span className="text-xs font-medium text-navy-900 dark:text-white text-left flex-1">
-                          {a.nome}
-                          {nomesDuplosTurma.has((a.nome ?? '').trim().toLowerCase()) && (
-                            <span className="ml-1 text-[9px] font-semibold text-amber-700 bg-amber-100 border border-amber-300 px-1 py-0.5 rounded">⚠️ repetido</span>
-                          )}
-                        </span>
-                        <span className={`text-[10px] font-semibold ${isJustificado ? 'text-amber-500' : isPresente ? 'text-primary-600' : 'text-red-400'}`}>
-                          {isJustificado ? 'Justificada' : isPresente ? 'Presente' : 'Falta'}
-                        </span>
-                      </button>
+                        }`}>
+                        <button
+                          disabled={isLocked}
+                          onClick={() => marcarPresenca(a.id, nextVal, nextVal === 'justificado' ? (motivoMap[a.id] ?? null) : null)}
+                          className="flex-1 min-w-0 flex items-center gap-3 px-1.5 py-1 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isJustificado
+                            ? <CheckCircle2 size={16} className="text-amber-500 flex-shrink-0" />
+                            : isPresente
+                            ? <CheckCircle2 size={16} className="text-primary-600 flex-shrink-0" />
+                            : <Circle size={16} className="text-red-400 flex-shrink-0" />}
+                          <div className="w-6 h-6 rounded-full bg-primary-600 flex items-center justify-center flex-shrink-0">
+                            <span className="text-white text-[9px] font-bold">{a.nome?.charAt(0)}</span>
+                          </div>
+                          <span className="text-xs font-medium text-navy-900 dark:text-white text-left flex-1 min-w-0 truncate">
+                            {a.nome}
+                            {nomesDuplosTurma.has((a.nome ?? '').trim().toLowerCase()) && (
+                              <span className="ml-1 text-[9px] font-semibold text-amber-700 bg-amber-100 border border-amber-300 px-1 py-0.5 rounded">⚠️ repetido</span>
+                            )}
+                            {isJustificado && motivoMap[a.id] && (
+                              <span className="block text-[9px] font-normal text-amber-600 dark:text-amber-400 truncate">{motivoMap[a.id]}</span>
+                            )}
+                          </span>
+                          <span className={`text-[10px] font-semibold flex-shrink-0 ${isJustificado ? 'text-amber-500' : isPresente ? 'text-primary-600' : 'text-red-400'}`}>
+                            {isJustificado ? 'Justificada' : isPresente ? 'Presente' : 'Falta'}
+                          </span>
+                        </button>
+                        {!isLocked && (
+                          <button onClick={() => abrirJustificar(a)} title="Justificar período (vários dias)"
+                            className="flex-shrink-0 text-slate-400 hover:text-amber-600 p-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/20">
+                            📅
+                          </button>
+                        )}
+                      </div>
                     )
                   })}
                 </div>
@@ -575,6 +649,43 @@ function AulaModal({ turma, alunos, presencas, registros, open, onClose, onSaved
           </div>
         )}
       </div>
+
+      {/* Modal — Justificar Ausência por período (vale pra todas as turmas do aluno) */}
+      <Modal open={!!justModalAluno} onClose={() => setJustModalAluno(null)} title={`Justificar ausência — ${justModalAluno?.nome ?? ''}`} size="sm">
+        <div className="space-y-3">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Vale para todas as turmas do aluno no período. Durante esse intervalo, a chamada já marca "Justificada" automaticamente com o motivo abaixo.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">De</label>
+              <input type="date" value={justForm.data_inicio}
+                onChange={e => setJustForm(f => ({ ...f, data_inicio: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"/>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Até</label>
+              <input type="date" value={justForm.data_fim}
+                onChange={e => setJustForm(f => ({ ...f, data_fim: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"/>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Motivo</label>
+            <input type="text" value={justForm.motivo}
+              onChange={e => setJustForm(f => ({ ...f, motivo: e.target.value }))}
+              placeholder="Ex: viagem em família, atestado médico..."
+              className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"/>
+          </div>
+          <div className="flex gap-2 justify-end pt-2">
+            <Button variant="secondary" size="sm" onClick={() => setJustModalAluno(null)}>Cancelar</Button>
+            <Button size="sm" onClick={salvarJustificativa}
+              disabled={savingJust || !justForm.data_inicio || !justForm.data_fim || !justForm.motivo.trim()}>
+              {savingJust ? 'Salvando…' : 'Salvar'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </Modal>
   )
 }
@@ -628,6 +739,7 @@ export default function PoloDetalhe() {
   }, [])
   useEffect(() => { reloadPresencas() }, [reloadPresencas])
   const { data: atestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id')
+  const { data: justificativas, reload: reloadJustificativas } = useSupabaseData('justificativas_ausencia', 'id,aluno_id,data_inicio,data_fim,motivo')
   const { data: viagens, reload: reloadViagens } = useSupabaseData('viagens', '*, turmas(*, modalidades(nome,emoji))')
   const { data: modalidades } = useSupabaseData('modalidades', 'id,nome,emoji')
   const { data: professores, reload: reloadProfessores } = useSupabaseData('profiles', 'id,nome,cargo,telefone,email')
@@ -2454,9 +2566,10 @@ export default function PoloDetalhe() {
         alunos={alunos}
         presencas={presencas}
         registros={registros}
+        justificativas={justificativas}
         open={!!aulaOpen}
         onClose={() => setAulaOpen(null)}
-        onSaved={() => { reloadPresencas(); reloadRegistros() }}
+        onSaved={() => { reloadPresencas(); reloadRegistros(); reloadJustificativas() }}
         adminMode={isAdmin}
       />
 
