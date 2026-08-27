@@ -1,0 +1,22 @@
+-- supabase/fix-timeout-presencas-indice-e-escopo.sql
+-- Aplicado em produção em 27/08/2026 (via SQL Editor, com o dono logado).
+--
+-- PROBLEMA: mesmo depois dos índices de alunos.turma_id/turmas.polo_id
+-- (fix-timeout-alunos-indices.sql), o timeout (57014) continuava acontecendo
+-- de verdade em produção — confirmado nos logs do Postgrest, em /alunos E
+-- /presencas, pra usuários reais (iPhone e Android) agora mesmo.
+--
+-- Causa: presencas.data não tinha índice nenhum, e a consulta de "últimos 90
+-- dias" (usada em PoloDetalhe.jsx e Alunos.jsx) buscava a tabela inteira sem
+-- nenhum filtro de turma, deixando a regra de segurança avaliar linha a linha
+-- ~12 mil registros pra cada requisição de quem não é admin. Confirmado com
+-- EXPLAIN ANALYZE (impersonando um professor real, dentro de uma transação
+-- com ROLLBACK): 7.2s antes do índice.
+--
+-- Índice sozinho não foi suficiente (ainda ~7s). O que realmente resolveu foi
+-- também escopar a CONSULTA em si (não só a regra de segurança) pelas turmas
+-- do polo que está sendo visto, em vez de buscar o sistema inteiro e deixar
+-- a regra de segurança filtrar depois — de 7.2s para ~0.66s. Esse ajuste foi
+-- feito no código (PoloDetalhe.jsx e Alunos.jsx), não no banco.
+
+CREATE INDEX IF NOT EXISTS idx_presencas_data ON presencas (data);

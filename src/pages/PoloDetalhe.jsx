@@ -719,8 +719,36 @@ export default function PoloDetalhe() {
 
   const { data: polos } = useSupabaseData('polos', '*')
   const { data: turmas, reload: reloadTurmas, loading: loadingTurmas, error: turmasError } = useSupabaseData('turmas', '*, modalidades(nome,emoji), profiles(id,nome,cargo), polos(nome)')
-  const { data: alunos, reload: reloadAlunos, error: alunosError } = useSupabaseData('alunos', 'id,nome,status,turma_id,data_nasc,data_matricula,cpf,telefone,telefone_emergencia,email,genero,foto_url,aluno_turmas(turma_id)')
-  // Busca apenas os últimos 90 dias para evitar o limite de 10k linhas do hook genérico
+
+  // IDs das turmas deste polo (sem escopo de viewAs — é o universo completo do
+  // polo, usado só pra pré-filtrar as buscas de alunos/presenças).
+  const turmaIdsDoPolo = useMemo(() => turmas.filter(t => t.polo_id === id).map(t => t.id), [turmas, id])
+
+  // Busca alunos JÁ FILTRADA pelas turmas deste polo (mais matrícula extra via
+  // aluno_turmas) — antes buscava TODO MUNDO do sistema e deixava a regra de
+  // segurança filtrar sozinha, o que ficou lento demais (~1900 alunos, timeout
+  // de banco) conforme a base cresceu. Ver supabase/fix-timeout-polo-scoped-queries.sql.
+  const [alunos, setAlunos] = useState([])
+  const [alunosError, setAlunosError] = useState(null)
+  const reloadAlunos = useCallback(async () => {
+    if (!turmaIdsDoPolo.length) { setAlunos([]); return }
+    const cols = 'id,nome,status,turma_id,data_nasc,data_matricula,cpf,telefone,telefone_emergencia,email,genero,foto_url,aluno_turmas(turma_id)'
+    const [{ data: primarios, error: errP }, { data: vinculos }] = await Promise.all([
+      supabase.from('alunos').select(cols).in('turma_id', turmaIdsDoPolo),
+      supabase.from('aluno_turmas').select('aluno_id').in('turma_id', turmaIdsDoPolo),
+    ])
+    const jaIncluidos = new Set((primarios ?? []).map(a => a.id))
+    const extraIds = [...new Set((vinculos ?? []).map(v => v.aluno_id))].filter(aid => !jaIncluidos.has(aid))
+    let extras = []
+    if (extraIds.length) {
+      const { data } = await supabase.from('alunos').select(cols).in('id', extraIds)
+      extras = data ?? []
+    }
+    setAlunos([...(primarios ?? []), ...extras])
+    setAlunosError(errP ?? null)
+  }, [turmaIdsDoPolo])
+  useEffect(() => { reloadAlunos() }, [reloadAlunos])
+
   const [presencas, setPresencas] = useState([])
   const [opTab, setOpTab] = useState('hoje')
   const [alunosTab, setAlunosTab] = useState('lista')
@@ -735,16 +763,20 @@ export default function PoloDetalhe() {
     setLoadingHist(false)
   }, [engajamentoRpc, id])
 
+  // Busca apenas os últimos 90 dias, e só das turmas deste polo — o mesmo
+  // ajuste do alunos acima (era a consulta system-wide mais lenta de todas).
   const reloadPresencas = useCallback(async () => {
+    if (!turmaIdsDoPolo.length) { setPresencas([]); return }
     const since = format(subDays(new Date(), 90), 'yyyy-MM-dd')
     const { data } = await supabase
       .from('presencas')
       .select('id,data,status,turma_id,aluno_id')
+      .in('turma_id', turmaIdsDoPolo)
       .gte('data', since)
       .order('data', { ascending: false })
       .limit(50000)
     setPresencas(data ?? [])
-  }, [])
+  }, [turmaIdsDoPolo])
   useEffect(() => { reloadPresencas() }, [reloadPresencas])
   const { data: atestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id')
   const { data: justificativas, reload: reloadJustificativas } = useSupabaseData('justificativas_ausencia', 'id,aluno_id,data_inicio,data_fim,motivo')
@@ -1444,11 +1476,15 @@ export default function PoloDetalhe() {
     setNovoAlunoErrors(erros)
     if (Object.keys(erros).length > 0) return
 
-    // Busca CPF em TODOS os alunos do sistema (não só do polo) para suporte cross-polo
+    // Busca CPF em TODOS os alunos do sistema (não só do polo) pra suporte
+    // cross-polo — sob demanda, só quando um CPF é digitado (não mais um
+    // fetch de todo mundo do sistema toda vez que o Polo abre).
     const cpfNorm = novoAlunoForm.cpf ? novoAlunoForm.cpf.replace(/\D/g, '') : ''
-    const alunoExistente = cpfNorm.length >= 11
-      ? alunos.find(a => a.cpf && a.cpf.replace(/\D/g, '') === cpfNorm)
-      : null
+    let alunoExistente = null
+    if (cpfNorm.length >= 11) {
+      const { data: candidatos } = await supabase.from('alunos').select('id,nome,cpf,turma_id')
+      alunoExistente = (candidatos ?? []).find(a => a.cpf && a.cpf.replace(/\D/g, '') === cpfNorm) ?? null
+    }
 
     if (!forcarSalvar && alunoExistente) {
       const turmaDup = turmasPolo.find(t => t.id === alunoExistente.turma_id)

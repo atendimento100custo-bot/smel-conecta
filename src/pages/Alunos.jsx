@@ -1,5 +1,5 @@
 // src/pages/Alunos.jsx
-import { useState, useRef, useMemo } from 'react'
+import { useState, useRef, useMemo, useCallback, useEffect } from 'react'
 import { useSupabaseData } from '../hooks/useSupabaseData'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -71,13 +71,70 @@ export default function Alunos() {
   const navigate = useNavigate()
   const turmaIdFilter = searchParams.get('turma_id')
 
-  const { data: alunos, loading, reload } = useSupabaseData('alunos', '*, turmas(*, modalidades(nome), polos(nome)), aluno_turmas(turma_id)')
   const { data: turmas } = useSupabaseData('turmas', '*, modalidades(nome), polos(nome)')
   const { data: modalidades } = useSupabaseData('modalidades', 'id,nome')
   const { data: polos } = useSupabaseData('polos', 'id,nome')
-  const { data: presencas } = useSupabaseData('presencas', 'id,data,status,turma_id,aluno_id')
   const { data: atestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id')
   const { data: atribuicoes } = useSupabaseData('atribuicoes', 'id,usuario_id,turma_id,polo_id')
+
+  // Polos do usuário (null = admin, sem restrição) — estagiário/professor/
+  // coordenador só enxergam alunos dos polos onde têm atribuição, igual já
+  // vale em Polos.jsx e no Polo em si. Isso também é o que evita buscar TODO
+  // MUNDO do sistema (~1900 alunos) numa consulta só, que ficou lenta demais
+  // e passou a estourar o tempo limite do banco conforme a base cresceu.
+  const myPoloIds = useMemo(() => {
+    if (isAdmin || !profile) return null
+    return [...new Set(atribuicoes.filter(a => a.usuario_id === profile.id && a.polo_id).map(a => a.polo_id))]
+  }, [isAdmin, atribuicoes, profile])
+  const minhasTurmaIds = useMemo(() => (
+    myPoloIds === null ? null : turmas.filter(t => myPoloIds.includes(t.polo_id)).map(t => t.id)
+  ), [myPoloIds, turmas])
+
+  const alunosCols = '*, turmas(*, modalidades(nome), polos(nome)), aluno_turmas(turma_id)'
+  const [alunos, setAlunos] = useState([])
+  const [loading, setLoading] = useState(true)
+  const reload = useCallback(async () => {
+    setLoading(true)
+    if (minhasTurmaIds === null) {
+      const { data } = await supabase.from('alunos').select(alunosCols).range(0, 9999)
+      setAlunos(data ?? [])
+      setLoading(false)
+      return
+    }
+    if (!minhasTurmaIds.length) { setAlunos([]); setLoading(false); return }
+    const [{ data: primarios }, { data: vinculos }] = await Promise.all([
+      supabase.from('alunos').select(alunosCols).in('turma_id', minhasTurmaIds),
+      supabase.from('aluno_turmas').select('aluno_id').in('turma_id', minhasTurmaIds),
+    ])
+    const jaIncluidos = new Set((primarios ?? []).map(a => a.id))
+    const extraIds = [...new Set((vinculos ?? []).map(v => v.aluno_id))].filter(id => !jaIncluidos.has(id))
+    const extras = extraIds.length
+      ? (await supabase.from('alunos').select(alunosCols).in('id', extraIds)).data ?? []
+      : []
+    setAlunos([...(primarios ?? []), ...extras])
+    setLoading(false)
+  }, [minhasTurmaIds])
+  useEffect(() => { reload() }, [reload])
+
+  // Presenças só das turmas relevantes e dos últimos 90 dias — usadas aqui
+  // só pra calcular frequência de elegibilidade/exibição, não precisa mais que isso.
+  const [presencas, setPresencas] = useState([])
+  useEffect(() => {
+    let cancelled = false
+    async function carregar() {
+      const since = new Date(); since.setDate(since.getDate() - 90)
+      const sinceIso = since.toISOString().slice(0, 10)
+      let q = supabase.from('presencas').select('id,data,status,turma_id,aluno_id').gte('data', sinceIso).limit(50000)
+      if (minhasTurmaIds !== null) {
+        if (!minhasTurmaIds.length) { if (!cancelled) setPresencas([]); return }
+        q = q.in('turma_id', minhasTurmaIds)
+      }
+      const { data } = await q
+      if (!cancelled) setPresencas(data ?? [])
+    }
+    carregar()
+    return () => { cancelled = true }
+  }, [minhasTurmaIds])
 
   // Novo / Editar aluno
   const [modalOpen, setModalOpen] = useState(false)
@@ -120,23 +177,14 @@ export default function Alunos() {
   const [importDone, setImportDone] = useState(false)
 
   // ─── filtro por papel + drill-down ───────────────────────────
-  // Turmas acessíveis para professor: via atribuicoes (fonte única) + campo legado professor_id
-  const minhasTurmaIds = useMemo(() => {
-    if (isAdmin || isCoordenador || isEstagiario || !profile) return null // null = acesso total
-    const ids = new Set(
-      atribuicoes
-        .filter(a => a.usuario_id === profile.id && a.turma_id)
-        .map(a => a.turma_id)
-    )
-    // compatibilidade com campo legado professor_id
-    turmas.forEach(t => { if (t.professor_id === profile.id) ids.add(t.id) })
-    return ids
-  }, [isAdmin, isCoordenador, isEstagiario, profile, atribuicoes, turmas])
-
+  // minhasTurmaIds já escopa a busca lá em cima (por polo) — esse filtro aqui
+  // só é uma segunda camada de segurança visual, pra cobrir o instante entre
+  // trocar de polo/atribuição e a busca terminar de recarregar.
   const alunosFiltrados = (() => {
     let list = minhasTurmaIds === null
       ? alunos
-      : alunos.filter(a => minhasTurmaIds.has(a.turma_id))
+      : alunos.filter(a => minhasTurmaIds.includes(a.turma_id) ||
+          (Array.isArray(a.aluno_turmas) && a.aluno_turmas.some(at => minhasTurmaIds.includes(at.turma_id))))
     if (turmaIdFilter) list = list.filter(a => a.turma_id === turmaIdFilter)
     if (filtroFaixa) list = list.filter(a => calcFaixa(a.data_nasc) === filtroFaixa)
     if (filtroModalidade) list = list.filter(a => a.turmas?.modalidades?.nome === filtroModalidade)
@@ -277,11 +325,17 @@ export default function Alunos() {
       return
     }
 
-    // Duplicate detection by CPF only (names can repeat)
+    // Duplicate detection by CPF only (names can repeat) — busca em TODOS os
+    // alunos do sistema (não só do polo do usuário), sob demanda: `alunos`
+    // aqui em cima já vem escopado por polo pra não recarregar todo mundo do
+    // sistema toda vez que a tela abre, mas o cruzamento de CPF precisa
+    // continuar valendo cross-polo.
     const cpfNorm = !editing && form.cpf ? form.cpf.replace(/\D/g, '') : ''
-    const alunoExistente = cpfNorm.length >= 11
-      ? alunos.find(a => a.cpf && a.cpf.replace(/\D/g, '') === cpfNorm)
-      : null
+    let alunoExistente = null
+    if (cpfNorm.length >= 11) {
+      const { data: candidatos } = await supabase.from('alunos').select('id,nome,cpf,turma_id')
+      alunoExistente = (candidatos ?? []).find(a => a.cpf && a.cpf.replace(/\D/g, '') === cpfNorm) ?? null
+    }
 
     if (!editing && !forcarSalvar && alunoExistente) {
       setDupWarningAlunos({ aluno: alunoExistente })
