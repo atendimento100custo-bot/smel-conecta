@@ -1,5 +1,5 @@
 // src/pages/Presenca.jsx
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMinhasChamadasSemana } from '../hooks/useMinhasChamadasSemana'
 import { useSupabaseData } from '../hooks/useSupabaseData'
@@ -67,7 +67,9 @@ export default function Presenca() {
   const [filtroPolo, setFiltroPolo] = useState('')
   const [adminTab,   setAdminTab]   = useState('supervisao') // 'supervisao' | 'chamada'
   const [supervisaoView, setSupervisaoView] = useState('pendencias') // 'pendencias' | 'adesao' | 'polo'
-  const [poloAberto, setPoloAberto] = useState({}) // { [poloId]: bool } — override manual do padrão
+  const [poloAberto, setPoloAberto] = useState({}) // { [poloId]: bool } — override manual do padrão (Supervisão)
+  const [poloTurmaAberto, setPoloTurmaAberto] = useState({}) // idem, mas do Selecionar Turma
+  const listaPresencaRef = useRef(null)
 
   // ── chamada ─────────────────────────────────────────────────────────────────
   const [chamada,        setChamada]        = useState(null)
@@ -190,6 +192,14 @@ export default function Presenca() {
   }
 
   // ── effects ──────────────────────────────────────────────────────────────────
+
+  // Rola até a Lista de Presença assim que uma turma é escolhida — sem isso,
+  // a seleção só aparecia lá embaixo (onde a lista de turmas fica) e dava a
+  // impressão de que o clique não tinha feito nada, até rolar manualmente.
+  useEffect(() => {
+    if (!turmaId) return
+    listaPresencaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [turmaId])
 
   useEffect(() => {
     if (!turmaId || !dataSel) { setChamada(null); return }
@@ -323,6 +333,36 @@ export default function Presenca() {
       registrado_por: profile.id,
     }, { onConflict: 'turma_id,aluno_id,data' })
     if (error) setSaveMsg({ type: 'error', text: 'Não deu pra salvar esse aluno agora. Confira sua internet e toque nele de novo.' })
+  }
+
+  // "Marcar todos presentes" / "Limpar" — pra não precisar tocar aluno por
+  // aluno numa turma grande. Só mexe nos alunos ativos, salva tudo de uma vez.
+  // "Limpar" apaga o registro (volta pra "Pendente"), não marca falta —
+  // marcar falta em massa por engano seria pior que ficar sem registro.
+  async function marcarTodosPresenca(status) {
+    const alvo = alunosAtivos
+    if (!alvo.length || !turmaId || !dataSel) return
+
+    if (status === 'limpar') {
+      setPresencaState(prev => { const n = { ...prev }; alvo.forEach(a => { delete n[a.id] }); return n })
+      const { error } = await supabase.from('presencas').delete()
+        .eq('turma_id', turmaId).eq('data', dataSel).in('aluno_id', alvo.map(a => a.id))
+      if (error) setSaveMsg({ type: 'error', text: 'Não deu pra limpar a lista agora. Confira sua internet e tente de novo.' })
+      return
+    }
+
+    setPresencaState(prev => { const n = { ...prev }; alvo.forEach(a => { n[a.id] = status }); return n })
+    let chamadaAtual = chamada
+    if (!chamadaAtual) {
+      const { data: nova, error: errChamada } = await supabase.from('chamadas')
+        .insert({ turma_id: turmaId, data: dataSel, iniciada_por: profile.id }).select('*').single()
+      if (!errChamada && nova) { chamadaAtual = nova; setChamada(nova) }
+    }
+    const { error } = await supabase.from('presencas').upsert(
+      alvo.map(a => ({ turma_id: turmaId, aluno_id: a.id, data: dataSel, status, motivo: null, registrado_por: profile.id })),
+      { onConflict: 'turma_id,aluno_id,data' }
+    )
+    if (error) setSaveMsg({ type: 'error', text: 'Não deu pra salvar a lista inteira agora. Confira sua internet e tente de novo.' })
   }
 
   async function encerrarChamada() {
@@ -649,7 +689,7 @@ export default function Presenca() {
 
         {/* ── Seção de presença da turma selecionada ── */}
         {turmaId && (
-          <div className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700">
+          <div ref={listaPresencaRef} className="bg-white dark:bg-navy-800 rounded-xl border border-slate-200 dark:border-navy-700 scroll-mt-4">
             {/* Cabeçalho com botão fechar */}
             <div className="px-4 py-3 border-b border-slate-100 dark:border-navy-700 flex items-start justify-between gap-2">
               <div>
@@ -724,6 +764,20 @@ export default function Presenca() {
                     <div className={`text-[9px] font-bold ${txt} uppercase tracking-wide mt-1`}>{label}</div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* Ações em massa — evita tocar aluno por aluno em turma grande */}
+            {alunos.length > 0 && editavel && (
+              <div className="px-4 py-2 border-b border-slate-100 dark:border-navy-700 flex gap-2">
+                <button onClick={() => marcarTodosPresenca('presente')}
+                  className="text-[10px] font-semibold text-emerald-600 hover:text-emerald-700 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-900/20">
+                  ✅ Marcar todos presentes
+                </button>
+                <button onClick={() => marcarTodosPresenca('limpar')}
+                  className="text-[10px] font-semibold text-slate-500 hover:text-red-500 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-navy-600 hover:bg-red-50 dark:hover:bg-red-900/20">
+                  🧹 Limpar presença
+                </button>
               </div>
             )}
 
@@ -897,11 +951,24 @@ export default function Presenca() {
               )}
             </div>
             <div className="divide-y divide-slate-100 dark:divide-navy-700">
-              {polosOrdenados.map(([poloId, polo]) => (
+              {polosOrdenados.map(([poloId, polo]) => {
+                const pendentesPolo = polo.turmas.filter(t => !chamadasPorTurma[t.id]?.[hoje]).length
+                const temSelecionada = polo.turmas.some(t => t.id === turmaId)
+                const aberto = poloTurmaAberto[poloId] ?? temSelecionada
+                return (
                 <div key={poloId}>
-                  <div className="px-4 py-2 bg-slate-50 dark:bg-navy-900/40">
-                    <span className="text-xs font-bold text-navy-900 dark:text-white">📍 {polo.label}</span>
-                  </div>
+                  <button onClick={() => setPoloTurmaAberto(p => ({ ...p, [poloId]: !aberto }))}
+                    className="w-full px-4 py-2.5 flex items-center gap-2 bg-slate-50 dark:bg-navy-900/40 hover:bg-slate-100 dark:hover:bg-navy-900/60 transition-colors">
+                    <span className="text-xs font-bold text-navy-900 dark:text-white flex-1 text-left">📍 {polo.label}</span>
+                    <span className="text-[10px] text-slate-400">{polo.turmas.length} turma{polo.turmas.length !== 1 ? 's' : ''}</span>
+                    {pendentesPolo > 0 && (
+                      <span className="text-[9px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-1.5 py-0.5 rounded-full font-bold">
+                        {pendentesPolo} pendente{pendentesPolo !== 1 ? 's' : ''}
+                      </span>
+                    )}
+                    {aberto ? <ChevronUp size={13} className="text-slate-400" /> : <ChevronDown size={13} className="text-slate-400" />}
+                  </button>
+                  {aberto && (
                   <table className="w-full text-xs">
                     <tbody>
                       {polo.turmas.map(turma => {
@@ -929,8 +996,10 @@ export default function Presenca() {
                       })}
                     </tbody>
                   </table>
+                  )}
                 </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         )}

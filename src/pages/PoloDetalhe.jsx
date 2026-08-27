@@ -217,12 +217,20 @@ function AulaModal({ turma, alunos, presencas, registros, justificativas = [], o
     if (error) showAulaToast('⚠️ Não deu pra salvar esse aluno agora — confira sua internet e toque nele de novo.', 'error')
   }
 
+  // "Nenhum" limpa o registro (volta pra falta sem marcar nada à força) —
+  // marcar falta em massa por engano seria pior que ficar sem registro.
   async function marcarTodos(alunosAlvo, novoValor) {
+    if (novoValor === false) {
+      setPresencaMap(m => { const n = { ...m }; alunosAlvo.forEach(a => { n[a.id] = false }); return n })
+      const { error } = await supabase.from('presencas').delete()
+        .eq('turma_id', turma.id).eq('data', dataHoje).in('aluno_id', alunosAlvo.map(a => a.id))
+      if (error) showAulaToast('⚠️ Não deu pra limpar a lista — confira sua internet e tente de novo.', 'error')
+      return
+    }
     setPresencaMap(m => { const n = { ...m }; alunosAlvo.forEach(a => { n[a.id] = novoValor }); return n })
-    const status = novoValor === 'presente' ? 'presente' : 'falta'
     const { error } = await supabase.from('presencas')
       .upsert(alunosAlvo.map(a => ({
-        turma_id: turma.id, aluno_id: a.id, data: dataHoje, status,
+        turma_id: turma.id, aluno_id: a.id, data: dataHoje, status: 'presente',
         motivo: null, registrado_por: profile?.id ?? null,
       })), { onConflict: 'turma_id,aluno_id,data' })
     if (error) showAulaToast('⚠️ Não deu pra salvar a lista inteira — confira sua internet e tente de novo.', 'error')
@@ -528,9 +536,9 @@ function AulaModal({ turma, alunos, presencas, registros, justificativas = [], o
                   className="flex-1 min-w-32 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-navy-600 bg-white dark:bg-navy-700 focus:outline-none focus:ring-1 focus:ring-primary-500"
                 />
                 <button onClick={() => marcarTodos(alunosTurma.filter(a => a.status === 'Ativo'), 'presente')}
-                  className="text-[10px] font-semibold text-primary-600 hover:text-primary-700 px-2 py-0.5 rounded border border-primary-200 dark:border-primary-700">Todos</button>
+                  className="text-[10px] font-semibold text-primary-600 hover:text-primary-700 px-2 py-0.5 rounded border border-primary-200 dark:border-primary-700">✅ Todos presentes</button>
                 <button onClick={() => marcarTodos(alunosTurma.filter(a => a.status === 'Ativo'), false)}
-                  className="text-[10px] font-semibold text-red-500 hover:text-red-600 px-2 py-0.5 rounded border border-red-200 dark:border-red-800">Nenhum</button>
+                  className="text-[10px] font-semibold text-red-500 hover:text-red-600 px-2 py-0.5 rounded border border-red-200 dark:border-red-800">🧹 Limpar</button>
               </div>
 
               {alunosTurma.length === 0 ? (
