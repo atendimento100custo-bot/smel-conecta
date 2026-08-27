@@ -599,8 +599,8 @@ export default function PoloDetalhe() {
   const [aulaOpen, setAulaOpen] = useState(null)
 
   const { data: polos } = useSupabaseData('polos', '*')
-  const { data: turmas, reload: reloadTurmas, loading: loadingTurmas } = useSupabaseData('turmas', '*, modalidades(nome,emoji), profiles(id,nome,cargo), polos(nome)')
-  const { data: alunos, reload: reloadAlunos } = useSupabaseData('alunos', 'id,nome,status,turma_id,data_nasc,data_matricula,cpf,telefone,telefone_emergencia,email,genero,foto_url,aluno_turmas(turma_id)')
+  const { data: turmas, reload: reloadTurmas, loading: loadingTurmas, error: turmasError } = useSupabaseData('turmas', '*, modalidades(nome,emoji), profiles(id,nome,cargo), polos(nome)')
+  const { data: alunos, reload: reloadAlunos, error: alunosError } = useSupabaseData('alunos', 'id,nome,status,turma_id,data_nasc,data_matricula,cpf,telefone,telefone_emergencia,email,genero,foto_url,aluno_turmas(turma_id)')
   // Busca apenas os últimos 90 dias para evitar o limite de 10k linhas do hook genérico
   const [presencas, setPresencas] = useState([])
   const [opTab, setOpTab] = useState('hoje')
@@ -886,6 +886,15 @@ export default function PoloDetalhe() {
       navigate('/polos')
     }
   }, [temAcesso, polos, profile, loadingAtribuicoes, loadingTurmas])
+
+  // Antes esse erro (ex: timeout do banco) sumia em silêncio — a tela só
+  // parecia "sem alunos". Agora pelo menos avisa que algo deu errado.
+  useEffect(() => {
+    if (turmasError) showToast('⚠️ Não foi possível carregar as turmas. Tente recarregar a página.', 'error')
+  }, [turmasError])
+  useEffect(() => {
+    if (alunosError) showToast('⚠️ Não foi possível carregar os alunos. Tente recarregar a página.', 'error')
+  }, [alunosError])
 
   // Atalho vindo do Dashboard ("Minhas turmas hoje" → ?turma=X): abre a aula
   // direto, sem precisar caçar o card manualmente na lista de hoje.
