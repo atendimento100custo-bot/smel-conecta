@@ -187,8 +187,10 @@ export default function Presenca() {
     detalhePorPolo[poloId].linhas.push(l)
   }
   const detalhePorPoloOrdenado = Object.entries(detalhePorPolo).sort(([, a], [, b]) => a.label.localeCompare(b.label, 'pt-BR'))
-  function poloEstaAberto(poloId, temPendencia) {
-    return poloAberto[poloId] ?? temPendencia
+  // Minimizado por padrão — mesmo com pendência, abrir todos de largada
+  // deixa a tela poluída. Só abre o que o usuário clicar pra abrir.
+  function poloEstaAberto(poloId) {
+    return poloAberto[poloId] ?? false
   }
 
   // ── effects ──────────────────────────────────────────────────────────────────
@@ -321,8 +323,15 @@ export default function Presenca() {
     if (!chamadaAtual) {
       const { data: nova, error: errChamada } = await supabase.from('chamadas')
         .insert({ turma_id: turmaId, data: dataSel, iniciada_por: profile.id }).select('*').single()
-      if (!errChamada && nova) { chamadaAtual = nova; setChamada(nova) }
-      else if (errChamada?.code === '23505') {
+      if (!errChamada && nova) {
+        chamadaAtual = nova; setChamada(nova)
+        // Loga já na primeira marcação — antes só logava no "Salvar Presença"
+        // do fim, e se a chamada fosse interrompida antes disso (celular
+        // travou, etc.) não sobrava nenhum rastro de quem começou a chamada,
+        // mesmo com a presença em si já salva.
+        logAcao?.({ acao: 'iniciar_chamada', perfil: profile, turma: selectedTurma,
+          detalhes: `Chamada iniciada às ${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}` })
+      } else if (errChamada?.code === '23505') {
         const { data: ex } = await supabase.from('chamadas').select('*').eq('turma_id', turmaId).eq('data', dataSel).single()
         if (ex) { chamadaAtual = ex; setChamada(ex) }
       }
@@ -356,7 +365,11 @@ export default function Presenca() {
     if (!chamadaAtual) {
       const { data: nova, error: errChamada } = await supabase.from('chamadas')
         .insert({ turma_id: turmaId, data: dataSel, iniciada_por: profile.id }).select('*').single()
-      if (!errChamada && nova) { chamadaAtual = nova; setChamada(nova) }
+      if (!errChamada && nova) {
+        chamadaAtual = nova; setChamada(nova)
+        logAcao?.({ acao: 'iniciar_chamada', perfil: profile, turma: selectedTurma,
+          detalhes: `Chamada iniciada às ${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}` })
+      }
     }
     const { error } = await supabase.from('presencas').upsert(
       alvo.map(a => ({ turma_id: turmaId, aluno_id: a.id, data: dataSel, status, motivo: null, registrado_por: profile.id })),
@@ -598,7 +611,7 @@ export default function Presenca() {
                   <div className="divide-y divide-slate-100 dark:divide-navy-700">
                     {detalhePorPoloOrdenado.map(([poloId, polo]) => {
                       const temPendencia = polo.linhas.some(l => l.pendente > 0)
-                      const aberto = poloEstaAberto(poloId, temPendencia)
+                      const aberto = poloEstaAberto(poloId)
                       return (
                         <div key={poloId}>
                           <button onClick={() => setPoloAberto(p => ({ ...p, [poloId]: !aberto }))}
