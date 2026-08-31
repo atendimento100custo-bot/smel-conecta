@@ -778,7 +778,7 @@ export default function PoloDetalhe() {
     setPresencas(data ?? [])
   }, [turmaIdsDoPolo])
   useEffect(() => { reloadPresencas() }, [reloadPresencas])
-  const { data: atestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id')
+  const { data: atestados, reload: reloadAtestados } = useSupabaseData('atestados', 'id,data_validade,aluno_id,arquivo_url')
   const { data: justificativas, reload: reloadJustificativas } = useSupabaseData('justificativas_ausencia', 'id,aluno_id,data_inicio,data_fim,motivo')
   const { data: viagens, reload: reloadViagens } = useSupabaseData('viagens', '*, turmas(*, modalidades(nome,emoji))')
   const { data: modalidades } = useSupabaseData('modalidades', 'id,nome,emoji')
@@ -941,6 +941,8 @@ export default function PoloDetalhe() {
   const [editAlunoMatriculas, setEditAlunoMatriculas] = useState([{ turma_id: '' }])
   const [editAlunoErrors, setEditAlunoErrors] = useState({})
   const [savingEditAluno, setSavingEditAluno] = useState(false)
+  const [editAlunoAtestadoId, setEditAlunoAtestadoId] = useState(null) // id do atestado já existente, se houver
+  const [uploadingAtestadoFotoEdit, setUploadingAtestadoFotoEdit] = useState(false)
 
   // Aba Alunos — excluir aluno
   const [deleteAlunoTarget, setDeleteAlunoTarget] = useState(null)
@@ -1360,6 +1362,11 @@ export default function PoloDetalhe() {
 
   function openEditAluno(a) {
     setEditAlunoId(a.id)
+    // Atestado é tabela separada (não coluna do aluno) — pega o mais recente
+    // desse aluno, se existir, pra já vir preenchido e dar pra atualizar.
+    const atestadoAtual = [...atestados].filter(at => at.aluno_id === a.id)
+      .sort((x, y) => (y.data_validade ?? '').localeCompare(x.data_validade ?? ''))[0]
+    setEditAlunoAtestadoId(atestadoAtual?.id ?? null)
     setEditAlunoForm({
       nome: a.nome ?? '',
       data_nasc: a.data_nasc ?? '',
@@ -1371,8 +1378,8 @@ export default function PoloDetalhe() {
       turma_id: a.turma_id ?? '',
       genero: a.genero ?? '',
       foto_url: a.foto_url ?? '',
-      atestado_validade: '',
-      atestado_foto: '',
+      atestado_validade: atestadoAtual?.data_validade ?? '',
+      atestado_foto: atestadoAtual?.arquivo_url ?? '',
     })
     // Carrega turmas do aluno filtradas a este polo; fallback para turma_id legado
     const turmasPoloIds = new Set(turmasPolo.map(t => t.id))
@@ -1415,6 +1422,24 @@ export default function PoloDetalhe() {
         const rows = novasMatriculas.map(m => ({ aluno_id: editAlunoId, turma_id: m.turma_id }))
         const { error: turmaErr } = await supabase.from('aluno_turmas').insert(rows)
         if (turmaErr && turmaErr.code !== '23505') throw turmaErr
+      }
+
+      // Atestado é tabela separada — atualiza se já existia, cria se não tinha
+      // nenhum ainda, e não mexe em nada se o campo ficou vazio.
+      if (editAlunoForm.atestado_validade) {
+        if (editAlunoAtestadoId) {
+          await supabase.from('atestados').update({
+            data_validade: editAlunoForm.atestado_validade,
+            arquivo_url: editAlunoForm.atestado_foto || null,
+          }).eq('id', editAlunoAtestadoId)
+        } else {
+          await supabase.from('atestados').insert({
+            aluno_id: editAlunoId,
+            data_validade: editAlunoForm.atestado_validade,
+            arquivo_url: editAlunoForm.atestado_foto || null,
+          })
+        }
+        reloadAtestados()
       }
 
       setSavingEditAluno(false)
@@ -1468,6 +1493,19 @@ export default function PoloDetalhe() {
       setNovoAlunoForm(f => ({ ...f, atestado_foto: data.publicUrl }))
     }
     setUploadingAtestadoFoto(false)
+  }
+
+  async function uploadFotoAtestadoEdit(file) {
+    if (!file) return
+    setUploadingAtestadoFotoEdit(true)
+    const ext = file.name.split('.').pop()
+    const fn = `atestados/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+    const { error } = await supabase.storage.from('atestados').upload(fn, file)
+    if (!error) {
+      const { data } = supabase.storage.from('atestados').getPublicUrl(fn)
+      setEditAlunoForm(f => ({ ...f, atestado_foto: data.publicUrl }))
+    }
+    setUploadingAtestadoFotoEdit(false)
   }
 
   async function salvarNovoAluno(forcarSalvar = false) {
@@ -2993,7 +3031,17 @@ export default function PoloDetalhe() {
                     </p>
                   </div>
                   <button
-                    onClick={() => navigate(`/alunos?turma_id=${alunos.find(a => a.id === atestado.aluno_id)?.turma_id}`)}
+                    onClick={() => {
+                      // Fica dentro do Polo (aba "Alunos" já existe aqui) em vez de
+                      // navegar pra tela separada /alunos — essa outra tela depende
+                      // de uma permissão à parte (Configurações > Permissões) que
+                      // pode estar desligada pra quem não é admin, e aí o clique
+                      // simplesmente voltava pro Dashboard sem explicação nenhuma.
+                      setAtestadosModalOpen(false)
+                      setAlunosFiltroTurma(aluno.turma_id ?? '')
+                      setAlunosBusca(aluno.nome ?? '')
+                      setTab('alunos')
+                    }}
                     className="text-xs px-2 py-1 rounded bg-primary-600 hover:bg-primary-700 text-white font-semibold"
                   >
                     Ver
@@ -3172,6 +3220,40 @@ export default function PoloDetalhe() {
             <input type="email" value={editAlunoForm.email} onChange={e => setEditAlunoForm(f => ({ ...f, email: e.target.value }))} placeholder="aluno@email.com"
               className={`w-full px-3 py-2 rounded-lg border text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 ${editAlunoErrors.email ? 'border-red-400' : 'border-slate-200 dark:border-navy-600'}`} />
             {editAlunoErrors.email && <p className="text-[10px] text-red-500 mt-1">{editAlunoErrors.email}</p>}
+          </div>
+
+          {/* Atestado médico — ver/atualizar validade e foto do atestado já existente */}
+          <div className="rounded-xl border border-amber-200 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-900/10 p-3 space-y-3">
+            <p className="text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wide">🏥 Atestado Médico</p>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Validade do Atestado</label>
+              <input type="date" value={editAlunoForm.atestado_validade}
+                onChange={e => setEditAlunoForm(f => ({ ...f, atestado_validade: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-400" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Foto do Atestado</label>
+              {editAlunoForm.atestado_foto ? (
+                <div className="flex items-center gap-2">
+                  <a href={editAlunoForm.atestado_foto} target="_blank" rel="noreferrer" className="text-[11px] text-primary-600 hover:underline">✓ Ver atestado enviado</a>
+                  <button type="button" onClick={() => setEditAlunoForm(f => ({ ...f, atestado_foto: '' }))} className="text-[10px] text-red-400 hover:text-red-600">Remover</button>
+                </div>
+              ) : (
+                <div className="flex gap-3">
+                  <label className={`flex items-center gap-1.5 text-[11px] font-semibold text-primary-600 cursor-pointer hover:text-primary-700 ${uploadingAtestadoFotoEdit ? 'opacity-50 pointer-events-none' : ''}`}>
+                    <Camera size={12}/> Fotografar
+                    <input type="file" accept="image/*" capture="environment" className="hidden"
+                      onChange={e => uploadFotoAtestadoEdit(e.target.files?.[0])} />
+                  </label>
+                  <label className={`flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 cursor-pointer hover:text-slate-700 ${uploadingAtestadoFotoEdit ? 'opacity-50 pointer-events-none' : ''}`}>
+                    <Upload size={12}/> Galeria / PDF
+                    <input type="file" accept="image/*,.pdf" className="hidden"
+                      onChange={e => uploadFotoAtestadoEdit(e.target.files?.[0])} />
+                  </label>
+                  {uploadingAtestadoFotoEdit && <p className="text-[10px] text-slate-400 animate-pulse">Enviando...</p>}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex gap-2 justify-end pt-2">
