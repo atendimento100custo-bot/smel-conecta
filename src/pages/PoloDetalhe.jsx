@@ -41,18 +41,26 @@ function formatDate(dateStr) {
 }
 
 // ─── sub-components ───────────────────────────────────────────────────────────
-function KpiCard({ label, value, sub, icon: Icon, highlight }) {
+function KpiCard({ label, value, sub, icon: Icon, highlight, onClick }) {
+  const Tag = onClick ? 'button' : 'div'
   return (
-    <div className={`rounded-xl border p-4 ${highlight
-      ? 'bg-gradient-to-br from-primary-700 to-primary-500 border-transparent text-white'
-      : 'bg-white dark:bg-navy-800 border-slate-200 dark:border-navy-700'}`}>
+    <Tag
+      onClick={onClick}
+      className={`rounded-xl border p-4 text-left w-full transition-all ${highlight
+        ? 'bg-gradient-to-br from-primary-700 to-primary-500 border-transparent text-white'
+        : 'bg-white dark:bg-navy-800 border-slate-200 dark:border-navy-700'}
+        ${onClick ? 'active:scale-[0.97] cursor-pointer hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm' : ''}`}
+    >
       <div className="flex items-start justify-between mb-2">
         <p className={`text-[9px] font-bold uppercase tracking-widest ${highlight ? 'text-primary-100' : 'text-slate-400 dark:text-slate-500'}`}>{label}</p>
         {Icon && <Icon size={13} className={highlight ? 'text-primary-200' : 'text-slate-300 dark:text-slate-600'} />}
       </div>
       <p className={`text-3xl font-extrabold leading-none ${highlight ? 'text-white' : 'text-navy-900 dark:text-white'}`}>{value}</p>
-      {sub && <p className={`text-[10px] mt-1 ${highlight ? 'text-primary-100' : 'text-slate-400 dark:text-slate-500'}`}>{sub}</p>}
-    </div>
+      <div className="flex items-end justify-between mt-1">
+        {sub ? <p className={`text-[10px] ${highlight ? 'text-primary-100' : 'text-slate-400 dark:text-slate-500'}`}>{sub}</p> : <span />}
+        {onClick && <ChevronRight size={12} className={highlight ? 'text-primary-100' : 'text-slate-300 dark:text-slate-600'} />}
+      </div>
+    </Tag>
   )
 }
 
@@ -815,6 +823,9 @@ export default function PoloDetalhe() {
   const [atestadosModalOpen, setAtestadosModalOpen] = useState(false)
   const [atestadosFiltro, setAtestadosFiltro] = useState('vencendo') // 'vencendo' ou 'vencido'
 
+  // Modal "Novos (30 dias)" — card sem tela própria, mostra um resumo rápido
+  const [novosModalOpen, setNovosModalOpen] = useState(false)
+
   // Grupos expandidos (modalidade nome) — start collapsed
   const [expandidos, setExpandidos] = useState(new Set())
   function toggleColapso(nome) {
@@ -1099,7 +1110,11 @@ export default function PoloDetalhe() {
     if (a.status !== 'Ativo' || !a.data_nasc) return false
     return new Date().getFullYear() - new Date(a.data_nasc).getFullYear() >= 60
   }).length, [alunosPolo])
-  const alunosNovos = alunosPolo.filter(a => a.status === 'Ativo' && a.data_matricula && new Date(a.data_matricula) >= ha30).length
+  const alunosRecentes = useMemo(() => alunosPolo
+    .filter(a => a.status === 'Ativo' && a.data_matricula && new Date(a.data_matricula) >= ha30)
+    .sort((x, y) => (y.data_matricula ?? '').localeCompare(x.data_matricula ?? '')),
+  [alunosPolo])
+  const alunosNovos = alunosRecentes.length
   const ocupacao = useMemo(() => {
     const cap = turmasPolo.filter(t => t.status === 'Ativa').reduce((s, t) => s + (t.capacidade || 0), 0)
     return cap ? Math.round((alunosAtivos / cap) * 100) : 0
@@ -1701,18 +1716,26 @@ export default function PoloDetalhe() {
         {tab === 'geral' && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <KpiCard label="Alunos Ativos" value={alunosAtivos} sub={`em ${turmasAtivas} turmas`} icon={Users} highlight />
-              <KpiCard label="Turmas Ativas" value={turmasAtivas} sub="em funcionamento" icon={BookOpen} />
-              <KpiCard label="Freq. Média" value={`${freqMedia}%`} sub="últimos 90 dias" icon={TrendingUp} />
-              <KpiCard label="Melhor Idade" value={melhorIdade} sub="alunos 60+" icon={UserCheck} />
+              <KpiCard label="Alunos Ativos" value={alunosAtivos} sub={`em ${turmasAtivas} turmas`} icon={Users} highlight
+                onClick={() => { setTab('alunos'); setAlunosTab('lista') }} />
+              <KpiCard label="Turmas Ativas" value={turmasAtivas} sub="em funcionamento" icon={BookOpen}
+                onClick={() => { setTab('operacional'); setOpTab('turmas') }} />
+              <KpiCard label="Freq. Média" value={`${freqMedia}%`} sub="últimos 90 dias" icon={TrendingUp}
+                onClick={() => { setTab('alunos'); setAlunosTab('engajamento'); carregarEngajamento() }} />
+              <KpiCard label="Melhor Idade" value={melhorIdade} sub="alunos 60+" icon={UserCheck}
+                onClick={() => setTab('viagens')} />
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <KpiCard label="Novos (30 dias)" value={alunosNovos} sub="matrículas recentes" icon={Users} />
-              <KpiCard label="Ocupação" value={`${ocupacao}%`} sub="capacidade total" icon={TrendingUp} />
-              <KpiCard label="Atestados Vencendo" value={atestadosVencendo} sub="próximos 30 dias" icon={Stethoscope} />
-              <KpiCard label="Atestados Vencidos" value={atestadosVencidos} sub="requer renovação" icon={Stethoscope} />
+              <KpiCard label="Novos (30 dias)" value={alunosNovos} sub="matrículas recentes" icon={Users}
+                onClick={() => setNovosModalOpen(true)} />
+              <KpiCard label="Ocupação" value={`${ocupacao}%`} sub="capacidade total" icon={TrendingUp}
+                onClick={() => { setTab('operacional'); setOpTab('turmas') }} />
+              <KpiCard label="Atestados Vencendo" value={atestadosVencendo} sub="próximos 30 dias" icon={Stethoscope}
+                onClick={() => { setAtestadosFiltro('vencendo'); setAtestadosModalOpen(true) }} />
+              <KpiCard label="Atestados Vencidos" value={atestadosVencidos} sub="requer renovação" icon={Stethoscope}
+                onClick={() => { setAtestadosFiltro('vencido'); setAtestadosModalOpen(true) }} />
             </div>
-            <p className="text-[9px] text-slate-400 dark:text-slate-600 text-right">Freq. Média baseada nos últimos 90 dias de presença</p>
+            <p className="text-[9px] text-slate-400 dark:text-slate-600 text-right">Toque em qualquer cartão acima para ver mais detalhes · Freq. Média baseada nos últimos 90 dias de presença</p>
 
             {atestadosVencendo > 0 && (
               <button onClick={() => { setAtestadosFiltro('vencendo'); setAtestadosModalOpen(true) }} className="w-full text-left bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl px-4 py-3 text-xs text-amber-800 dark:text-amber-300 font-medium hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors">
@@ -3043,6 +3066,37 @@ export default function PoloDetalhe() {
                       setTab('alunos')
                     }}
                     className="text-xs px-2 py-1 rounded bg-primary-600 hover:bg-primary-700 text-white font-semibold"
+                  >
+                    Ver
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* Modal: Novos (30 dias) — card sem tela própria, resumo rápido aqui mesmo */}
+      <Modal open={novosModalOpen} onClose={() => setNovosModalOpen(false)} title="Matrículas recentes · últimos 30 dias" size="lg">
+        <div className="space-y-4">
+          {alunosRecentes.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-6">Nenhuma matrícula nova nos últimos 30 dias.</p>
+          ) : (
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {alunosRecentes.map(a => (
+                <div key={a.id} className="flex items-center justify-between p-3 rounded-lg border border-slate-200 dark:border-navy-700 bg-slate-50 dark:bg-navy-900/30">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-navy-900 dark:text-white truncate">{a.nome}</p>
+                    <p className="text-xs text-slate-400 dark:text-slate-500">Matriculado em {formatDate(a.data_matricula)}</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setNovosModalOpen(false)
+                      setAlunosFiltroTurma(a.turma_id ?? '')
+                      setAlunosBusca(a.nome ?? '')
+                      setTab('alunos')
+                    }}
+                    className="text-xs px-2 py-1 rounded bg-primary-600 hover:bg-primary-700 text-white font-semibold flex-shrink-0 ml-2"
                   >
                     Ver
                   </button>
