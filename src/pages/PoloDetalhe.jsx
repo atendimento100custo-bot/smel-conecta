@@ -201,9 +201,17 @@ function AulaModal({ turma, alunos, presencas, registros, justificativas = [], o
         detalhes: `Chamada iniciada às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
       })
     } else if (error?.code === '23505') {
+      // Já existe chamada pra essa turma hoje (outra pessoa iniciou antes) —
+      // busca essa chamada. Se não vier nada, é sinal de que a regra de
+      // segurança bloqueou a leitura: sem vínculo nessa turma/polo.
       const { data: ex } = await supabase.from('chamadas').select('*')
-        .eq('turma_id', turma.id).eq('data', dataHoje).single()
+        .eq('turma_id', turma.id).eq('data', dataHoje).maybeSingle()
       if (ex) setChamada(ex)
+      else showAulaToast('⚠️ Você não tem permissão pra iniciar essa turma — seu cadastro não está vinculado a ela. Fale com o admin.', 'error')
+    } else if (error) {
+      // Bloqueio direto da regra de segurança (ex: sem vínculo na turma/polo)
+      // ou qualquer outro erro inesperado no INSERT.
+      showAulaToast('⚠️ Você não tem permissão pra iniciar essa turma — seu cadastro não está vinculado a ela. Fale com o admin.', 'error')
     }
     setIniciando(false)
   }
