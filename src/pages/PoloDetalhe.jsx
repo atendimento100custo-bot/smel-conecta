@@ -1036,11 +1036,11 @@ export default function PoloDetalhe() {
     return atribuicoes.some(a => a.usuario_id === profile?.id && a.turma_id === t.id)
   }, [isAdmin, atribuicoes, profile, id])
 
-  // canDeleteAluno: admin, coordenador global ou coordenador/professor deste polo
+  // canDeleteAluno: admin, coordenador global ou coordenador/professor/estagiário deste polo
   const canDeleteAluno = useMemo(() => {
     if (isAdmin || isCoordenador) return true
     if (!profile || loadingAtribuicoes) return false
-    return atribuicoes.some(a => a.usuario_id === profile.id && a.polo_id === id && (a.cargo === 'coordenador' || a.cargo === 'professor'))
+    return atribuicoes.some(a => a.usuario_id === profile.id && a.polo_id === id && (a.cargo === 'coordenador' || a.cargo === 'professor' || a.cargo === 'estagiario'))
   }, [isAdmin, isCoordenador, atribuicoes, loadingAtribuicoes, profile, id])
 
   // Acesso ao polo: admin (livre), ou estagiário/professor/coordenador só do(s) polo(s)

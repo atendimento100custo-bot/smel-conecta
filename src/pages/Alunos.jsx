@@ -682,7 +682,7 @@ export default function Alunos() {
                           >
                             <Pencil size={13} />
                           </button>
-                          {(isAdmin || isCoordenador || isProfessor) && (
+                          {(isAdmin || isCoordenador || isProfessor || isEstagiario) && (
                             <button
                               onClick={() => setDeletando(a)}
                               className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"
